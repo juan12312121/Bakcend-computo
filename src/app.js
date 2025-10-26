@@ -19,43 +19,86 @@ dotenv.config();
 // =======================
 const routes = require('./routes');
 const errorHandler = require('./middlewares/errorHandler');
+const db = require('./config/database');
 
 // =======================
 //  CONFIGURACIÓN DEL SERVIDOR
 // =======================
 const app = express();
 
-// Seguridad con cabeceras HTTP
+// =======================
+//  MIDDLEWARES DE SEGURIDAD Y CONFIGURACIÓN
+// =======================
+
+// Cabeceras HTTP seguras
 app.use(helmet());
 
-// Configuración de CORS
+// ✅ Configuración de CORS — permite acceso desde Angular local y tu IP pública de AWS
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:4200',
-  credentials: true
+  origin: [
+    'http://localhost:4200',            // Angular local
+    'http://3.140.201.220:4200',        // IP pública AWS (frontend)
+    /^http:\/\/3\.140\.201\.220(:\d+)?$/ // Regex para permitir cualquier puerto de esa IP
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-// Compresión de respuestas HTTP
+// Compresión HTTP
 app.use(compression());
 
-// Permitir JSON y formularios
+// Parseo de JSON y formularios
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Cookies y logging
+// Manejo de cookies y logs
 app.use(cookieParser());
 app.use(morgan('dev'));
+
+// =======================
+//  HEALTH CHECK
+// =======================
+app.get('/health', async (req, res) => {
+  try {
+    // Verificar conexión a la base de datos
+    await db.query('SELECT 1');
+
+    res.status(200).json({
+      status: 'OK',
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+      environment: process.env.NODE_ENV || 'development',
+      database: 'Connected',
+      port: process.env.PORT || 3000,
+      message: '✅ Servidor funcionando correctamente'
+    });
+  } catch (error) {
+    res.status(503).json({
+      status: 'ERROR',
+      timestamp: new Date().toISOString(),
+      environment: process.env.NODE_ENV || 'development',
+      database: 'Disconnected',
+      message: '❌ Error en el servidor',
+      error: error.message
+    });
+  }
+});
 
 // =======================
 //  RUTAS PRINCIPALES
 // =======================
 app.use('/api', routes);
 
-// Ruta raíz de prueba
+// =======================
+//  RUTA PRINCIPAL DE PRUEBA
+// =======================
 app.get('/', (req, res) => {
   res.json({
     mensaje: '🚀 API RedStudent funcionando correctamente',
     version: '1.0.0',
     endpoints: {
+      health: '/health',
       auth: '/api/auth',
       usuarios: '/api/usuarios',
       publicaciones: '/api/publicaciones'
@@ -82,12 +125,15 @@ app.use((req, res) => {
 //  INICIAR SERVIDOR
 // =======================
 const PORT = process.env.PORT || 3000;
+const HOST = '0.0.0.0';
 
-app.listen(PORT, () => {
+app.listen(PORT, HOST, () => {
   console.log('===============================');
-  console.log(` Servidor corriendo en puerto: ${PORT}`);
-  console.log(` Entorno: ${process.env.NODE_ENV || 'desarrollo'}`);
-  console.log(` API disponible en: http://localhost:${PORT}/api`);
+  console.log(`✅ Servidor corriendo en puerto: ${PORT}`);
+  console.log(`🌍 Host: ${HOST}`);
+  console.log(`📦 Entorno: ${process.env.NODE_ENV || 'desarrollo'}`);
+  console.log(`🩺 Health Check: http://localhost:${PORT}/health`);
+  console.log(`🚀 API disponible en: http://localhost:${PORT}/api`);
   console.log('===============================');
 });
 
