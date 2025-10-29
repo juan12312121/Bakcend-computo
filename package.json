@@ -8,7 +8,11 @@
     "test": "jest --coverage",
     "test:watch": "jest --watch"
   },
-  "keywords": ["social-network", "students", "api"],
+  "keywords": [
+    "social-network",
+    "students",
+    "api"
+  ],
   "author": "",
   "license": "ISC",
   "description": "Backend para Red Social Estudiantil",

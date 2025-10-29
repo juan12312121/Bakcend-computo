@@ -1,5 +1,7 @@
 const Usuario = require('../models/Usuario');
 const { successResponse, errorResponse } = require('../utils/responses');
+const fs = require('fs');
+const path = require('path');
 
 // Obtener perfil de usuario
 exports.obtenerPerfil = async (req, res) => {
@@ -37,10 +39,18 @@ exports.obtenerMiPerfil = async (req, res) => {
   }
 };
 
-// Actualizar perfil (completar información adicional)
+// Actualizar perfil (completar información adicional + imágenes)
 exports.actualizarPerfil = async (req, res) => {
   try {
     const { nombre_completo, biografia, ubicacion, carrera } = req.body;
+    
+    console.log('📥 Datos recibidos:', {
+      nombre_completo,
+      biografia,
+      ubicacion,
+      carrera,
+      archivos: req.files
+    });
     
     // Crear objeto solo con los campos que fueron enviados
     const datosActualizar = {};
@@ -50,23 +60,102 @@ exports.actualizarPerfil = async (req, res) => {
     if (ubicacion !== undefined) datosActualizar.ubicacion = ubicacion;
     if (carrera !== undefined) datosActualizar.carrera = carrera;
     
+    // 🔥 Manejar foto de perfil
+    if (req.files && req.files.foto_perfil) {
+      const fotoPerfil = req.files.foto_perfil[0];
+      datosActualizar.foto_perfil_url = `/uploads/perfiles/${fotoPerfil.filename}`;
+      console.log('✅ Foto de perfil:', datosActualizar.foto_perfil_url);
+      
+      // Opcional: Eliminar foto anterior
+      try {
+        const usuarioAnterior = await Usuario.buscarPorId(req.usuario.id);
+        if (usuarioAnterior?.foto_perfil_url) {
+          const rutaAnterior = path.join(__dirname, '..', usuarioAnterior.foto_perfil_url);
+          if (fs.existsSync(rutaAnterior)) {
+            fs.unlinkSync(rutaAnterior);
+            console.log('🗑️ Foto de perfil anterior eliminada');
+          }
+        }
+      } catch (error) {
+        console.log('⚠️ No se pudo eliminar foto anterior:', error.message);
+      }
+    }
+    
+    // 🔥 Manejar foto de portada
+    if (req.files && req.files.foto_portada) {
+      const fotoPortada = req.files.foto_portada[0];
+      datosActualizar.foto_portada_url = `/uploads/portadas/${fotoPortada.filename}`;
+      console.log('✅ Foto de portada:', datosActualizar.foto_portada_url);
+      
+      // Opcional: Eliminar portada anterior
+      try {
+        const usuarioAnterior = await Usuario.buscarPorId(req.usuario.id);
+        if (usuarioAnterior?.foto_portada_url) {
+          const rutaAnterior = path.join(__dirname, '..', usuarioAnterior.foto_portada_url);
+          if (fs.existsSync(rutaAnterior)) {
+            fs.unlinkSync(rutaAnterior);
+            console.log('🗑️ Foto de portada anterior eliminada');
+          }
+        }
+      } catch (error) {
+        console.log('⚠️ No se pudo eliminar portada anterior:', error.message);
+      }
+    }
+    
     // Verificar que al menos un campo fue enviado
     if (Object.keys(datosActualizar).length === 0) {
       return errorResponse(res, 'No hay datos para actualizar', 400);
     }
     
+    console.log('💾 Datos a actualizar:', datosActualizar);
+    
     const actualizado = await Usuario.actualizar(req.usuario.id, datosActualizar);
     
     if (!actualizado) {
+      // Si hay error, eliminar archivos subidos
+      if (req.files) {
+        if (req.files.foto_perfil) {
+          try {
+            fs.unlinkSync(req.files.foto_perfil[0].path);
+          } catch (e) {}
+        }
+        if (req.files.foto_portada) {
+          try {
+            fs.unlinkSync(req.files.foto_portada[0].path);
+          } catch (e) {}
+        }
+      }
       return errorResponse(res, 'No se pudo actualizar el perfil', 400);
     }
     
     const usuarioActualizado = await Usuario.buscarPorId(req.usuario.id);
     
+    console.log('✅ Perfil actualizado:', {
+      id: usuarioActualizado.id,
+      nombre: usuarioActualizado.nombre_completo,
+      foto_perfil_url: usuarioActualizado.foto_perfil_url,
+      foto_portada_url: usuarioActualizado.foto_portada_url
+    });
+    
     return successResponse(res, usuarioActualizado, 'Perfil actualizado exitosamente');
     
   } catch (error) {
-    console.error('Error al actualizar perfil:', error);
+    console.error('❌ Error al actualizar perfil:', error);
+    
+    // Eliminar archivos subidos si hay error
+    if (req.files) {
+      if (req.files.foto_perfil) {
+        try {
+          fs.unlinkSync(req.files.foto_perfil[0].path);
+        } catch (e) {}
+      }
+      if (req.files.foto_portada) {
+        try {
+          fs.unlinkSync(req.files.foto_portada[0].path);
+        } catch (e) {}
+      }
+    }
+    
     return errorResponse(res, 'Error al actualizar perfil', 500);
   }
 };

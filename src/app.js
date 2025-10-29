@@ -1,6 +1,3 @@
-// =======================
-//  DEPENDENCIAS PRINCIPALES
-// =======================
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -8,133 +5,165 @@ const morgan = require('morgan');
 const compression = require('compression');
 const cookieParser = require('cookie-parser');
 const dotenv = require('dotenv');
+const path = require('path');
+const fs = require('fs');
 
-// =======================
-//  CONFIGURACIÓN ENV
-// =======================
 dotenv.config();
 
-// =======================
-//  IMPORTAR RUTAS Y MIDDLEWARES
-// =======================
 const routes = require('./routes');
 const errorHandler = require('./middlewares/errorHandler');
 const db = require('./config/database');
 
-// =======================
-//  CONFIGURACIÓN DEL SERVIDOR
-// =======================
 const app = express();
 
-// =======================
-//  MIDDLEWARES DE SEGURIDAD Y CONFIGURACIÓN
-// =======================
+const uploadsDir = path.join(__dirname, 'uploads');
+const perfilesDir = path.join(uploadsDir, 'perfiles');
+const publicacionesDir = path.join(uploadsDir, 'publicaciones');
 
-// Cabeceras HTTP seguras
-app.use(helmet());
+[uploadsDir, perfilesDir, publicacionesDir].forEach(dir => {
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+    console.log(`📁 Carpeta creada: ${dir}`);
+  } else {
+    console.log(`✅ Carpeta existe: ${dir}`);
+  }
+});
 
-// ✅ Configuración de CORS — permite acceso desde Angular local y tu IP pública de AWS
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+  crossOriginEmbedderPolicy: false
+}));
+
 app.use(cors({
   origin: [
-    'http://localhost:4200',            // Angular local
-    'http://3.140.201.220:4200',        // IP pública AWS (frontend)
-    /^http:\/\/3\.140\.201\.220(:\d+)?$/ // Regex para permitir cualquier puerto de esa IP
+    'http://localhost:4200',
+    'http://13.59.190.199:4200',
+    /^http:\/\/3\.144\.201\.57(:\d+)?$/
   ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-// Compresión HTTP
 app.use(compression());
-
-// Parseo de JSON y formularios
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-
-// Manejo de cookies y logs
 app.use(cookieParser());
 app.use(morgan('dev'));
 
-// =======================
-//  HEALTH CHECK
-// =======================
-app.get('/health', async (req, res) => {
-  try {
-    // Verificar conexión a la base de datos
-    await db.query('SELECT 1');
+console.log('📂 Sirviendo archivos desde:', path.join(__dirname, 'uploads'));
 
-    res.status(200).json({
-      status: 'OK',
-      timestamp: new Date().toISOString(),
-      uptime: process.uptime(),
-      environment: process.env.NODE_ENV || 'development',
-      database: 'Connected',
-      port: process.env.PORT || 3000,
-      message: '✅ Servidor funcionando correctamente'
+app.use('/uploads', express.static(path.join(__dirname, 'uploads'), {
+  setHeaders: (res, filepath) => {
+    res.set('Access-Control-Allow-Origin', '*');
+    res.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.set('Cross-Origin-Resource-Policy', 'cross-origin');
+    res.set('Cache-Control', 'public, max-age=86400'); // Cache por 1 día
+    console.log('📤 Sirviendo archivo:', filepath);
+  }
+}));
+
+app.get('/debug/uploads', (req, res) => {
+  try {
+    const uploadsExists = fs.existsSync(uploadsDir);
+    const perfilesExists = fs.existsSync(perfilesDir);
+    
+    let archivosPerfiles = [];
+    let archivosPublicaciones = [];
+    
+    if (perfilesExists) {
+      archivosPerfiles = fs.readdirSync(perfilesDir).map(file => ({
+        nombre: file,
+        ruta: `/uploads/perfiles/${file}`,
+        urlCompleta: `http://${req.get('host')}/uploads/perfiles/${file}`,
+        tamaño: fs.statSync(path.join(perfilesDir, file)).size,
+        fecha: fs.statSync(path.join(perfilesDir, file)).mtime
+      }));
+    }
+    
+    if (fs.existsSync(publicacionesDir)) {
+      archivosPublicaciones = fs.readdirSync(publicacionesDir).map(file => ({
+        nombre: file,
+        ruta: `/uploads/publicaciones/${file}`,
+        urlCompleta: `http://${req.get('host')}/uploads/publicaciones/${file}`,
+        tamaño: fs.statSync(path.join(publicacionesDir, file)).size,
+        fecha: fs.statSync(path.join(publicacionesDir, file)).mtime
+      }));
+    }
+    
+    res.json({
+      success: true,
+      directorios: {
+        uploadsDir: {
+          existe: uploadsExists,
+          ruta: uploadsDir
+        },
+        perfilesDir: {
+          existe: perfilesExists,
+          ruta: perfilesDir,
+          cantidadArchivos: archivosPerfiles.length
+        },
+        publicacionesDir: {
+          existe: fs.existsSync(publicacionesDir),
+          ruta: publicacionesDir,
+          cantidadArchivos: archivosPublicaciones.length
+        }
+      },
+      archivos: {
+        perfiles: archivosPerfiles,
+        publicaciones: archivosPublicaciones
+      }
     });
   } catch (error) {
-    res.status(503).json({
-      status: 'ERROR',
-      timestamp: new Date().toISOString(),
-      environment: process.env.NODE_ENV || 'development',
-      database: 'Disconnected',
-      message: '❌ Error en el servidor',
-      error: error.message
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      stack: error.stack
     });
   }
 });
 
-// =======================
-//  RUTAS PRINCIPALES
-// =======================
-app.use('/api', routes);
 
-// =======================
-//  RUTA PRINCIPAL DE PRUEBA
-// =======================
+
+// Ruta raíz
 app.get('/', (req, res) => {
   res.json({
-    mensaje: '🚀 API RedStudent funcionando correctamente',
+    mensaje: 'API RedStudent funcionando correctamente',
     version: '1.0.0',
     endpoints: {
       health: '/health',
       auth: '/api/auth',
       usuarios: '/api/usuarios',
-      publicaciones: '/api/publicaciones'
+      publicaciones: '/api/publicaciones',
+      uploads: '/uploads'
     }
   });
 });
 
-// =======================
-//  MANEJO DE ERRORES
-// =======================
+app.use('/api', routes);
+
 app.use(errorHandler);
 
-// =======================
-//  RUTA NO ENCONTRADA (404)
-// =======================
 app.use((req, res) => {
+  // Si la ruta empieza con /uploads, ya fue manejada arriba
+  if (req.path.startsWith('/uploads')) {
+    console.log('❌ Archivo no encontrado:', req.path);
+  }
   res.status(404).json({
     success: false,
-    mensaje: 'Ruta no encontrada'
+    mensaje: 'Ruta no encontrada',
+    path: req.path
   });
 });
 
-// =======================
-//  INICIAR SERVIDOR
-// =======================
 const PORT = process.env.PORT || 3000;
 const HOST = '0.0.0.0';
 
 app.listen(PORT, HOST, () => {
-  console.log('===============================');
-  console.log(`✅ Servidor corriendo en puerto: ${PORT}`);
-  console.log(`🌍 Host: ${HOST}`);
-  console.log(`📦 Entorno: ${process.env.NODE_ENV || 'desarrollo'}`);
-  console.log(`🩺 Health Check: http://localhost:${PORT}/health`);
-  console.log(`🚀 API disponible en: http://localhost:${PORT}/api`);
-  console.log('===============================');
+  console.log('🚀 Servidor corriendo en puerto:', PORT);
+  console.log('🌐 Host:', HOST);
+  console.log('📁 Uploads directory:', uploadsDir);
+  console.log('🔧 Entorno:', process.env.NODE_ENV || 'desarrollo');
 });
 
 module.exports = app;
