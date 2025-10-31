@@ -9,19 +9,34 @@ class Publicacion {
       VALUES (?, ?, ?, ?, ?, ?)
     `;
 
+    // Mapeo automático de categoría a color
+    const categoriaColores = {
+      'General': 'bg-orange-500',
+      'Tecnología': 'bg-teal-500',
+      'Ciencias': 'bg-purple-500',
+      'Artes y Cultura': 'bg-pink-500',
+      'Deportes': 'bg-blue-500',
+      'Salud y Bienestar': 'bg-green-500',
+      'Vida Universitaria': 'bg-orange-600',
+      'Opinión': 'bg-indigo-500',
+      'Entrevistas': 'bg-yellow-500'
+    };
+
+    const categoria = datos.categoria || 'General';
+    const color = datos.color_categoria || categoriaColores[categoria] || 'bg-orange-500';
+
     const [resultado] = await db.execute(query, [
       datos.usuario_id,
       datos.contenido,
       datos.imagen_url || null,
       datos.imagen_s3 || null,
-      datos.categoria || 'General',
-      datos.color_categoria || 'bg-gray-500'
+      categoria,
+      color
     ]);
 
     return resultado.insertId;
   }
 
-  // ✅ CORREGIDO: Cambié "usuario usuarios" por "usuarios U"
   static async obtenerTodas() {
     const query = `
       SELECT P.*, U.nombre_completo, U.nombre_usuario, U.foto_perfil_url
@@ -45,10 +60,22 @@ class Publicacion {
     return filas[0] || null;
   }
 
-  // ✅ CORREGIDO: Faltaba construir el array de campos
   static async actualizar(id, usuarioId, datos) {
     const campos = [];
     const valores = [];
+
+    // Mapeo de categoría a color
+    const categoriaColores = {
+      'General': 'bg-orange-500',
+      'Tecnología': 'bg-teal-500',
+      'Ciencias': 'bg-purple-500',
+      'Artes y Cultura': 'bg-pink-500',
+      'Deportes': 'bg-blue-500',
+      'Salud y Bienestar': 'bg-green-500',
+      'Vida Universitaria': 'bg-orange-600',
+      'Opinión': 'bg-indigo-500',
+      'Entrevistas': 'bg-yellow-500'
+    };
 
     if (datos.contenido !== undefined) {
       campos.push('contenido = ?');
@@ -65,6 +92,12 @@ class Publicacion {
     if (datos.categoria !== undefined) {
       campos.push('categoria = ?');
       valores.push(datos.categoria);
+      
+      // Si cambia la categoría, actualizar el color automáticamente
+      if (!datos.color_categoria) {
+        campos.push('color_categoria = ?');
+        valores.push(categoriaColores[datos.categoria] || 'bg-orange-500');
+      }
     }
     if (datos.color_categoria !== undefined) {
       campos.push('color_categoria = ?');
@@ -108,7 +141,6 @@ class Publicacion {
     return filas;
   }
 
-  // ✅ MEJORADO: Ahora maneja el error de columna seguido_id si no existe la tabla
   static async obtenerTodasParaUsuario(usuarioId) {
     try {
       const query = `
@@ -126,13 +158,11 @@ class Publicacion {
       const [filas] = await db.execute(query, [usuarioId, usuarioId]);
       return filas;
     } catch (error) {
-      // Si falla (tabla seguidores no existe o columna incorrecta), solo retornar las del usuario
       console.warn('⚠️ Tabla seguidores no disponible, mostrando solo publicaciones propias');
       return await this.obtenerPorUsuario(usuarioId);
     }
   }
 
-  // Obtener publicaciones de un usuario específico
   static async obtenerPorUsuario(usuarioId) {
     const query = `
       SELECT P.*, U.nombre_completo, U.nombre_usuario, U.foto_perfil_url
@@ -143,6 +173,21 @@ class Publicacion {
     `;
     const [filas] = await db.execute(query, [usuarioId]);
     return filas;
+  }
+
+  // ✅ NUEVO: Obtener lista de categorías disponibles
+  static getCategorias() {
+    return [
+      { value: 'General', label: 'General', color: 'bg-orange-500' },
+      { value: 'Tecnología', label: 'Tecnología', color: 'bg-teal-500' },
+      { value: 'Ciencias', label: 'Ciencias', color: 'bg-purple-500' },
+      { value: 'Artes y Cultura', label: 'Artes y Cultura', color: 'bg-pink-500' },
+      { value: 'Deportes', label: 'Deportes', color: 'bg-blue-500' },
+      { value: 'Salud y Bienestar', label: 'Salud y Bienestar', color: 'bg-green-500' },
+      { value: 'Vida Universitaria', label: 'Vida Universitaria', color: 'bg-orange-600' },
+      { value: 'Opinión', label: 'Opinión', color: 'bg-indigo-500' },
+      { value: 'Entrevistas', label: 'Entrevistas', color: 'bg-yellow-500' }
+    ];
   }
 }
 

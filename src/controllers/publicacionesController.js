@@ -1,21 +1,38 @@
 const Publicacion = require('../models/Publicacion');
 const { successResponse, errorResponse } = require('../utils/responses');
 
+// ✅ NUEVO: Endpoint para obtener categorías disponibles
+exports.obtenerCategorias = async (req, res) => {
+  try {
+    const categorias = Publicacion.getCategorias();
+    return successResponse(res, categorias, 'Lista de categorías disponibles');
+  } catch (error) {
+    console.error('❌ Error al obtener categorías:', error);
+    return errorResponse(res, 'Error al obtener categorías', 500);
+  }
+};
+
 // Crear nueva publicación
 exports.crearPublicacion = async (req, res) => {
   try {
-    const { contenido, categoria, color_categoria } = req.body;
+    const { contenido, categoria } = req.body;
 
     if (!contenido) {
       return errorResponse(res, 'El contenido es obligatorio', 400);
+    }
+
+    // Validar categoría si se proporciona
+    const categoriasValidas = Publicacion.getCategorias().map(c => c.value);
+    if (categoria && !categoriasValidas.includes(categoria)) {
+      return errorResponse(res, `Categoría inválida. Debe ser una de: ${categoriasValidas.join(', ')}`, 400);
     }
 
     const nuevaPublicacionId = await Publicacion.crear({
       usuario_id: req.usuario.id,
       contenido,
       imagen_url: req.file ? `/uploads/publicaciones/${req.file.filename}` : null,
-      categoria,
-      color_categoria
+      categoria: categoria || 'General'
+      // color_categoria se asigna automáticamente en el modelo
     });
 
     const publicacion = await Publicacion.obtenerPorId(nuevaPublicacionId);
@@ -33,15 +50,12 @@ exports.obtenerPublicaciones = async (req, res) => {
     let publicaciones;
 
     if (!req.usuario) {
-      // Usuario no autenticado → mostrar aleatorias
       publicaciones = await Publicacion.obtenerAleatorias();
       return successResponse(res, publicaciones, 'Publicaciones aleatorias para usuario no autenticado');
     }
 
-    // Usuario autenticado → publicaciones de los que sigue + propias
     publicaciones = await Publicacion.obtenerTodasParaUsuario(req.usuario.id);
 
-    // Si no sigue a nadie, mostrar aleatorias
     if (!publicaciones.length) {
       publicaciones = await Publicacion.obtenerAleatorias();
       return successResponse(res, publicaciones, 'Publicaciones aleatorias porque no sigue a nadie');
@@ -71,10 +85,8 @@ exports.obtenerPublicacion = async (req, res) => {
   }
 };
 
-// ✅ CORREGIDO: Obtener MIS publicaciones (solo las mías, no las de quienes sigo)
 exports.obtenerMisPublicaciones = async (req, res) => {
   try {
-    // Usar obtenerPorUsuario en lugar de obtenerTodasParaUsuario
     const publicaciones = await Publicacion.obtenerPorUsuario(req.usuario.id);
     
     return successResponse(
@@ -104,9 +116,17 @@ exports.obtenerPublicacionesUsuario = async (req, res) => {
 exports.actualizarPublicacion = async (req, res) => {
   try {
     const { id } = req.params;
-    const { contenido, categoria, color_categoria } = req.body;
+    const { contenido, categoria } = req.body;
 
-    const datosActualizar = { contenido, categoria, color_categoria };
+    // Validar categoría si se proporciona
+    if (categoria) {
+      const categoriasValidas = Publicacion.getCategorias().map(c => c.value);
+      if (!categoriasValidas.includes(categoria)) {
+        return errorResponse(res, `Categoría inválida. Debe ser una de: ${categoriasValidas.join(', ')}`, 400);
+      }
+    }
+
+    const datosActualizar = { contenido, categoria };
     if (req.file) {
       datosActualizar.imagen_url = `/uploads/publicaciones/${req.file.filename}`;
     }

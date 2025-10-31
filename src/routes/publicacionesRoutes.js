@@ -18,11 +18,12 @@ const storage = multer.diskStorage({
 const upload = multer({ storage });
 
 // CRUD - ORDEN CORRECTO (rutas específicas ANTES de rutas con parámetros)
+router.get('/categorias', publicacionController.obtenerCategorias); 
 router.post('/', proteger, upload.single('imagen'), publicacionController.crearPublicacion);
 router.get('/', publicacionController.obtenerPublicaciones); // feed
-router.get('/mis-publicaciones', proteger, publicacionController.obtenerMisPublicaciones); // ⬅️ MOVER ANTES de /:id
-router.get('/usuario/:usuarioId', publicacionController.obtenerPublicacionesUsuario); // publicaciones de otro usuario
-router.get('/:id', publicacionController.obtenerPublicacion); // ⬅️ MOVER AL FINAL (rutas con parámetros siempre al final)
+router.get('/mis-publicaciones', proteger, publicacionController.obtenerMisPublicaciones);
+router.get('/usuario/:usuarioId', publicacionController.obtenerPublicacionesUsuario);
+router.get('/:id', publicacionController.obtenerPublicacion); // ⬅️ Siempre al final
 router.put('/:id', proteger, upload.single('imagen'), publicacionController.actualizarPublicacion);
 router.delete('/:id', proteger, publicacionController.eliminarPublicacion);
 
