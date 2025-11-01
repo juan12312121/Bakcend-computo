@@ -45,26 +45,76 @@ exports.crearPublicacion = async (req, res) => {
 };
 
 // Obtener todas las publicaciones (feed)
+// 🔧 REEMPLAZA la función obtenerPublicaciones en tu controlador
+
 exports.obtenerPublicaciones = async (req, res) => {
   try {
+    console.log('📍 Obteniendo publicaciones...');
+    console.log('👤 Usuario autenticado:', req.usuario ? req.usuario.id : 'No autenticado');
+    
     let publicaciones;
 
-    if (!req.usuario) {
-      publicaciones = await Publicacion.obtenerAleatorias();
-      return successResponse(res, publicaciones, 'Publicaciones aleatorias para usuario no autenticado');
+    // Si no hay usuario autenticado, mostrar publicaciones aleatorias
+    if (!req.usuario || !req.usuario.id) {
+      console.log('🎲 Mostrando publicaciones aleatorias (usuario no autenticado)');
+      publicaciones = await Publicacion.obtenerAleatorias(20);
+      return successResponse(res, publicaciones, 'Publicaciones aleatorias');
     }
 
-    publicaciones = await Publicacion.obtenerTodasParaUsuario(req.usuario.id);
+    // Intentar obtener publicaciones del feed (seguidos + propias)
+    try {
+      console.log('📱 Obteniendo feed personalizado para usuario:', req.usuario.id);
+      publicaciones = await Publicacion.obtenerTodasParaUsuario(req.usuario.id);
+      
+      console.log('✅ Publicaciones del feed:', publicaciones.length);
+      
+      // Si el usuario no sigue a nadie, complementar con aleatorias
+      if (!publicaciones || publicaciones.length === 0) {
+        console.log('🎲 Usuario no sigue a nadie, mostrando aleatorias');
+        publicaciones = await Publicacion.obtenerAleatorias(20);
+        return successResponse(res, publicaciones, 'Publicaciones aleatorias (no sigues a nadie)');
+      }
+      
+      // Si tiene pocas publicaciones, complementar con aleatorias
+      if (publicaciones.length < 5) {
+        console.log('📊 Pocas publicaciones, complementando con aleatorias');
+        const aleatorias = await Publicacion.obtenerAleatorias(10);
+        
+        // Filtrar duplicados
+        const idsExistentes = new Set(publicaciones.map(p => p.id));
+        const nuevas = aleatorias.filter(p => !idsExistentes.has(p.id));
+        
+        publicaciones = [...publicaciones, ...nuevas];
+      }
 
-    if (!publicaciones.length) {
-      publicaciones = await Publicacion.obtenerAleatorias();
-      return successResponse(res, publicaciones, 'Publicaciones aleatorias porque no sigue a nadie');
+      return successResponse(res, publicaciones, 'Feed personalizado');
+      
+    } catch (feedError) {
+      // Si falla obtener el feed (ej: tabla seguidores no existe)
+      console.warn('⚠️ Error al obtener feed personalizado:', feedError.message);
+      console.log('🔄 Obteniendo todas las publicaciones como fallback');
+      
+      publicaciones = await Publicacion.obtenerTodas();
+      
+      if (!publicaciones || publicaciones.length === 0) {
+        return successResponse(res, [], 'No hay publicaciones disponibles');
+      }
+      
+      return successResponse(res, publicaciones, 'Todas las publicaciones');
     }
-
-    return successResponse(res, publicaciones, 'Lista de publicaciones');
+    
   } catch (error) {
-    console.error('❌ Error al obtener publicaciones:', error);
-    return errorResponse(res, 'Error al obtener publicaciones', 500);
+    console.error('❌ Error crítico al obtener publicaciones:', error);
+    console.error('Stack:', error.stack);
+    
+    // Intentar devolver algo en lugar de error 500
+    try {
+      const publicacionesBackup = await Publicacion.obtenerTodas();
+      return successResponse(res, publicacionesBackup || [], 'Publicaciones (modo backup)');
+    } catch (backupError) {
+      console.error('❌ Error en backup:', backupError);
+      return errorResponse(res, 'Error al obtener publicaciones', 500, [error.message]);
+    }
   }
 };
 

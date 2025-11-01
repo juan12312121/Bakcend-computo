@@ -3,48 +3,89 @@ const { successResponse, errorResponse } = require('../utils/responses');
 const fs = require('fs');
 const path = require('path');
 
-// Obtener perfil de usuario
+// ==================== OBTENER MI PERFIL (USUARIO AUTENTICADO) ====================
+exports.obtenerMiPerfil = async (req, res) => {
+  try {
+    console.log('========== OBTENER MI PERFIL ==========');
+    console.log('req.usuario:', req.usuario);
+    
+    // Obtener ID del usuario desde el token
+    const usuarioId = req.usuario?.id || req.usuario?.usuario_id;
+    
+    if (!usuarioId) {
+      console.error('❌ No se encontró ID de usuario en el token');
+      return errorResponse(res, 'Usuario no autenticado', 401);
+    }
+
+    console.log('🔍 Buscando usuario con ID:', usuarioId);
+
+    // Buscar usuario por ID
+    const usuario = await Usuario.buscarPorId(usuarioId);
+    
+    if (!usuario) {
+      console.error('❌ Usuario no encontrado con ID:', usuarioId);
+      return errorResponse(res, 'Usuario no encontrado', 404);
+    }
+
+    console.log('✅ Perfil encontrado:', usuario.nombre_usuario);
+
+    // Remover información sensible
+    delete usuario.contrasena;
+    delete usuario.password;
+    
+    return successResponse(res, usuario, 'Perfil obtenido exitosamente');
+    
+  } catch (error) {
+    console.error('❌ Error al obtener mi perfil:', error);
+    console.error('Stack:', error.stack);
+    
+    return errorResponse(res, 'Error al obtener perfil', 500);
+  }
+};
+
+// ==================== OBTENER PERFIL POR ID ====================
 exports.obtenerPerfil = async (req, res) => {
   try {
     const { id } = req.params;
     
+    console.log('🔍 Obteniendo perfil del usuario ID:', id);
+
+    // Validar que el ID sea un número
+    if (isNaN(id)) {
+      return errorResponse(res, 'ID de usuario inválido', 400);
+    }
+
+    // Buscar usuario por ID
     const usuario = await Usuario.buscarPorId(id);
     
     if (!usuario) {
       return errorResponse(res, 'Usuario no encontrado', 404);
     }
+
+    console.log('✅ Perfil encontrado:', usuario.nombre_usuario);
+
+    // Remover información sensible
+    delete usuario.contrasena;
+    delete usuario.password;
     
     return successResponse(res, usuario, 'Perfil obtenido exitosamente');
     
   } catch (error) {
-    console.error('Error al obtener perfil:', error);
+    console.error('❌ Error al obtener perfil:', error);
+    console.error('Stack:', error.stack);
+    
     return errorResponse(res, 'Error al obtener perfil del usuario', 500);
   }
 };
 
-// Obtener mi perfil (usuario autenticado)
-exports.obtenerMiPerfil = async (req, res) => {
-  try {
-    const usuario = await Usuario.buscarPorId(req.usuario.id);
-    
-    if (!usuario) {
-      return errorResponse(res, 'Usuario no encontrado', 404);
-    }
-    
-    return successResponse(res, usuario, 'Perfil obtenido exitosamente');
-    
-  } catch (error) {
-    console.error('Error al obtener mi perfil:', error);
-    return errorResponse(res, 'Error al obtener perfil', 500);
-  }
-};
-
-// Actualizar perfil (completar información adicional + imágenes)
+// ==================== ACTUALIZAR PERFIL ====================
 exports.actualizarPerfil = async (req, res) => {
   try {
+    const usuarioId = req.usuario?.id || req.usuario?.usuario_id;
     const { nombre_completo, biografia, ubicacion, carrera } = req.body;
     
-    console.log('📥 Datos recibidos:', {
+    console.log('📥 Datos recibidos para actualizar:', {
+      usuarioId,
       nombre_completo,
       biografia,
       ubicacion,
@@ -66,10 +107,13 @@ exports.actualizarPerfil = async (req, res) => {
       datosActualizar.foto_perfil_url = `/uploads/perfiles/${fotoPerfil.filename}`;
       console.log('✅ Foto de perfil:', datosActualizar.foto_perfil_url);
       
-      // Opcional: Eliminar foto anterior
+      // ✅ CAMBIO: YA NO ELIMINAMOS la foto anterior
+      console.log('📸 Nueva foto de perfil guardada (foto anterior mantenida)');
+      
+      /* CÓDIGO ANTERIOR QUE ELIMINABA LA FOTO - AHORA COMENTADO
       try {
-        const usuarioAnterior = await Usuario.buscarPorId(req.usuario.id);
-        if (usuarioAnterior?.foto_perfil_url) {
+        const usuarioAnterior = await Usuario.buscarPorId(usuarioId);
+        if (usuarioAnterior?.foto_perfil_url && !usuarioAnterior.foto_perfil_url.includes('ui-avatars.com')) {
           const rutaAnterior = path.join(__dirname, '..', usuarioAnterior.foto_perfil_url);
           if (fs.existsSync(rutaAnterior)) {
             fs.unlinkSync(rutaAnterior);
@@ -79,6 +123,7 @@ exports.actualizarPerfil = async (req, res) => {
       } catch (error) {
         console.log('⚠️ No se pudo eliminar foto anterior:', error.message);
       }
+      */
     }
     
     // 🔥 Manejar foto de portada
@@ -87,9 +132,12 @@ exports.actualizarPerfil = async (req, res) => {
       datosActualizar.foto_portada_url = `/uploads/portadas/${fotoPortada.filename}`;
       console.log('✅ Foto de portada:', datosActualizar.foto_portada_url);
       
-      // Opcional: Eliminar portada anterior
+      // ✅ CAMBIO: YA NO ELIMINAMOS la foto anterior
+      console.log('📸 Nueva foto de portada guardada (foto anterior mantenida)');
+      
+      /* CÓDIGO ANTERIOR QUE ELIMINABA LA FOTO - AHORA COMENTADO
       try {
-        const usuarioAnterior = await Usuario.buscarPorId(req.usuario.id);
+        const usuarioAnterior = await Usuario.buscarPorId(usuarioId);
         if (usuarioAnterior?.foto_portada_url) {
           const rutaAnterior = path.join(__dirname, '..', usuarioAnterior.foto_portada_url);
           if (fs.existsSync(rutaAnterior)) {
@@ -100,6 +148,7 @@ exports.actualizarPerfil = async (req, res) => {
       } catch (error) {
         console.log('⚠️ No se pudo eliminar portada anterior:', error.message);
       }
+      */
     }
     
     // Verificar que al menos un campo fue enviado
@@ -109,7 +158,7 @@ exports.actualizarPerfil = async (req, res) => {
     
     console.log('💾 Datos a actualizar:', datosActualizar);
     
-    const actualizado = await Usuario.actualizar(req.usuario.id, datosActualizar);
+    const actualizado = await Usuario.actualizar(usuarioId, datosActualizar);
     
     if (!actualizado) {
       // Si hay error, eliminar archivos subidos
@@ -128,7 +177,11 @@ exports.actualizarPerfil = async (req, res) => {
       return errorResponse(res, 'No se pudo actualizar el perfil', 400);
     }
     
-    const usuarioActualizado = await Usuario.buscarPorId(req.usuario.id);
+    const usuarioActualizado = await Usuario.buscarPorId(usuarioId);
+    
+    // Remover información sensible
+    delete usuarioActualizado.contrasena;
+    delete usuarioActualizado.password;
     
     console.log('✅ Perfil actualizado:', {
       id: usuarioActualizado.id,
@@ -141,6 +194,7 @@ exports.actualizarPerfil = async (req, res) => {
     
   } catch (error) {
     console.error('❌ Error al actualizar perfil:', error);
+    console.error('Stack:', error.stack);
     
     // Eliminar archivos subidos si hay error
     if (req.files) {
@@ -160,38 +214,59 @@ exports.actualizarPerfil = async (req, res) => {
   }
 };
 
-// Buscar usuarios
+// ==================== BUSCAR USUARIOS ====================
 exports.buscarUsuarios = async (req, res) => {
   try {
     const { q } = req.query;
     
-    if (!q || q.trim().length < 2) {
+    console.log('🔍 Búsqueda recibida:', q);
+    
+    // Validar parámetro
+    if (!q || typeof q !== 'string' || q.trim().length === 0) {
+      return successResponse(res, [], 'Sin resultados');
+    }
+
+    // Validar longitud mínima
+    if (q.trim().length < 2) {
       return errorResponse(res, 'El término de búsqueda debe tener al menos 2 caracteres', 400);
     }
-    
+
+    // Buscar usuarios
     const usuarios = await Usuario.buscar(q);
+    
+    console.log('✅ Usuarios encontrados:', usuarios.length);
     
     return successResponse(res, usuarios, `${usuarios.length} usuarios encontrados`);
     
   } catch (error) {
-    console.error('Error al buscar usuarios:', error);
+    console.error('❌ Error al buscar usuarios:', error);
+    console.error('Stack:', error.stack);
+    
     return errorResponse(res, 'Error al buscar usuarios', 500);
   }
 };
 
-// Eliminar cuenta
+// ==================== ELIMINAR CUENTA ====================
 exports.eliminarCuenta = async (req, res) => {
   try {
-    const eliminado = await Usuario.eliminar(req.usuario.id);
+    const usuarioId = req.usuario?.id || req.usuario?.usuario_id;
+    
+    console.log('🗑️ Eliminando cuenta del usuario ID:', usuarioId);
+    
+    const eliminado = await Usuario.eliminar(usuarioId);
     
     if (!eliminado) {
       return errorResponse(res, 'No se pudo eliminar la cuenta', 400);
     }
     
+    console.log('✅ Cuenta eliminada exitosamente');
+    
     return successResponse(res, null, 'Cuenta eliminada exitosamente');
     
   } catch (error) {
-    console.error('Error al eliminar cuenta:', error);
+    console.error('❌ Error al eliminar cuenta:', error);
+    console.error('Stack:', error.stack);
+    
     return errorResponse(res, 'Error al eliminar cuenta', 500);
   }
 };

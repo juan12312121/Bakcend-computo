@@ -2,13 +2,10 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
-// ✅ SOLUCIÓN: Usar rutas ABSOLUTAS basadas en la ubicación de server.js
-// __dirname aquí es: /home/ubuntu/Bakcend-computo/src/config
-// Necesitamos subir a /home/ubuntu/Bakcend-computo/src/uploads
-
+// ✅ Usar rutas ABSOLUTAS basadas en la ubicación de server.js
 const uploadsBase = path.join(__dirname, '../uploads');
 
-// ✅ Crear carpetas si no existen (CON RUTAS ABSOLUTAS)
+// ✅ Crear carpetas si no existen
 const crearCarpetas = () => {
   const carpetas = [
     path.join(uploadsBase, 'perfiles'),
@@ -47,12 +44,19 @@ const storage = multer.diskStorage({
     cb(null, destino);
   },
   filename: function (req, file, cb) {
-    // Generar nombre único: timestamp-random.ext
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    const ext = path.extname(file.originalname);
-    const filename = file.fieldname + '-' + uniqueSuffix + ext;
+    // 🔥 CLAVE: Obtener el usuario_id desde req.usuario (viene del middleware proteger)
+    const usuario_id = req.usuario ? req.usuario.id : 'guest';
     
-    console.log(`📝 Nombre de archivo: ${filename}`);
+    // Generar nombre único: foto_{tipo}-{usuario_id}-{timestamp}.ext
+    const timestamp = Date.now();
+    const ext = path.extname(file.originalname).toLowerCase();
+    
+    // Formato: foto_perfil-6-1761972628605.jpg
+    const filename = `${file.fieldname}-${usuario_id}-${timestamp}${ext}`;
+    
+    console.log(`📝 Nombre de archivo generado: ${filename}`);
+    console.log(`👤 Usuario ID: ${usuario_id}`);
+    
     cb(null, filename);
   }
 });

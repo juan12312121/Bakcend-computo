@@ -17,13 +17,21 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-// CRUD - ORDEN CORRECTO (rutas específicas ANTES de rutas con parámetros)
+// ⚠️ IMPORTANTE: Rutas específicas ANTES de rutas con parámetros
 router.get('/categorias', publicacionController.obtenerCategorias); 
+
+// 🔧 TEMPORAL: Quitar middleware hasta arreglar el backend
+// Cambiar de:
+// router.get('/', protegerOpcional, publicacionController.obtenerPublicaciones);
+// A:
+router.get('/', publicacionController.obtenerPublicaciones); 
+
 router.post('/', proteger, upload.single('imagen'), publicacionController.crearPublicacion);
-router.get('/', publicacionController.obtenerPublicaciones); // feed
 router.get('/mis-publicaciones', proteger, publicacionController.obtenerMisPublicaciones);
 router.get('/usuario/:usuarioId', publicacionController.obtenerPublicacionesUsuario);
-router.get('/:id', publicacionController.obtenerPublicacion); // ⬅️ Siempre al final
+
+// ⚠️ Rutas con :id siempre al FINAL
+router.get('/:id', publicacionController.obtenerPublicacion);
 router.put('/:id', proteger, upload.single('imagen'), publicacionController.actualizarPublicacion);
 router.delete('/:id', proteger, publicacionController.eliminarPublicacion);
 
