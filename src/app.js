@@ -38,7 +38,7 @@ app.use(cors({
   origin: [
     'http://localhost:4200',
     'http://13.59.190.199:4200',
-    'http://3.144.201.57:4200',
+    'http://3.146.83.30:4200',
     /^http:\/\/3\.144\.201\.57(:\d+)?$/
   ],
   credentials: true,

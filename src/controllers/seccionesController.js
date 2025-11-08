@@ -1,3 +1,4 @@
+// controllers/seccionesController.js
 const SeccionModel = require('../models/Seccion');
 const PublicacionModel = require('../models/Publicacion');
 
@@ -7,7 +8,7 @@ const seccionesController = {
   crearSeccion: async (req, res) => {
     try {
       const { nombre, icono, color } = req.body;
-      const usuario_id = req.user.id;
+      const usuario_id = req.usuario.id; // ✅ CAMBIO: req.user.id -> req.usuario.id
 
       // Validaciones
       if (!nombre || nombre.trim().length === 0) {
@@ -46,13 +47,16 @@ const seccionesController = {
       const seccion = await SeccionModel.buscarPorId(seccionId);
 
       res.status(201).json({
+        success: true, // ✅ AGREGADO para coincidir con el frontend
         mensaje: 'Sección creada exitosamente',
+        seccion_id: seccionId, // ✅ AGREGADO
         seccion
       });
 
     } catch (error) {
       console.error('Error al crear sección:', error);
       res.status(500).json({ 
+        success: false, // ✅ AGREGADO
         error: 'Error al crear la sección' 
       });
     }
@@ -61,14 +65,12 @@ const seccionesController = {
   // Obtener todas las secciones del usuario autenticado
   obtenerMisSecciones: async (req, res) => {
     try {
-      const usuario_id = req.user.id;
+      const usuario_id = req.usuario.id; // ✅ CAMBIO: req.user.id -> req.usuario.id
 
       const secciones = await SeccionModel.obtenerPorUsuario(usuario_id);
 
-      res.json({
-        secciones,
-        total: secciones.length
-      });
+      // ✅ CAMBIO: Devolver array directo para coincidir con el frontend
+      res.json(secciones);
 
     } catch (error) {
       console.error('Error al obtener secciones:', error);
@@ -82,7 +84,7 @@ const seccionesController = {
   obtenerSeccion: async (req, res) => {
     try {
       const { id } = req.params;
-      const usuario_id = req.user.id;
+      const usuario_id = req.usuario.id; // ✅ CAMBIO: req.user.id -> req.usuario.id
 
       // Buscar la sección
       const seccion = await SeccionModel.buscarPorIdYUsuario(id, usuario_id);
@@ -114,7 +116,7 @@ const seccionesController = {
     try {
       const { id } = req.params;
       const { nombre, icono, color } = req.body;
-      const usuario_id = req.user.id;
+      const usuario_id = req.usuario.id; // ✅ CAMBIO: req.user.id -> req.usuario.id
 
       // Verificar que la sección pertenece al usuario
       const seccion = await SeccionModel.buscarPorIdYUsuario(id, usuario_id);
@@ -172,6 +174,7 @@ const seccionesController = {
       const seccionActualizada = await SeccionModel.buscarPorId(id);
 
       res.json({
+        success: true, // ✅ AGREGADO
         mensaje: 'Sección actualizada exitosamente',
         seccion: seccionActualizada
       });
@@ -179,6 +182,7 @@ const seccionesController = {
     } catch (error) {
       console.error('Error al actualizar sección:', error);
       res.status(500).json({ 
+        success: false, // ✅ AGREGADO
         error: 'Error al actualizar la sección' 
       });
     }
@@ -188,7 +192,7 @@ const seccionesController = {
   eliminarSeccion: async (req, res) => {
     try {
       const { id } = req.params;
-      const usuario_id = req.user.id;
+      const usuario_id = req.usuario.id; // ✅ CAMBIO: req.user.id -> req.usuario.id
 
       // Verificar que la sección pertenece al usuario
       const seccion = await SeccionModel.buscarPorIdYUsuario(id, usuario_id);
@@ -203,12 +207,14 @@ const seccionesController = {
       await SeccionModel.eliminar(id, usuario_id);
 
       res.json({
+        success: true, // ✅ AGREGADO
         mensaje: 'Sección eliminada exitosamente'
       });
 
     } catch (error) {
       console.error('Error al eliminar sección:', error);
       res.status(500).json({ 
+        success: false, // ✅ AGREGADO
         error: 'Error al eliminar la sección' 
       });
     }
@@ -218,7 +224,7 @@ const seccionesController = {
   agregarPostASeccion: async (req, res) => {
     try {
       const { seccion_id, publicacion_id } = req.body;
-      const usuario_id = req.user.id;
+      const usuario_id = req.usuario.id; // ✅ CAMBIO: req.user.id -> req.usuario.id
 
       // Validaciones
       if (!seccion_id || !publicacion_id) {
@@ -264,12 +270,14 @@ const seccionesController = {
       await SeccionModel.agregarPost(seccion_id, publicacion_id);
 
       res.json({
+        success: true, // ✅ AGREGADO
         mensaje: 'Post agregado a la sección exitosamente'
       });
 
     } catch (error) {
       console.error('Error al agregar post a sección:', error);
       res.status(500).json({ 
+        success: false, // ✅ AGREGADO
         error: 'Error al agregar el post a la sección' 
       });
     }
@@ -279,7 +287,7 @@ const seccionesController = {
   quitarPostDeSeccion: async (req, res) => {
     try {
       const { seccion_id, publicacion_id } = req.body;
-      const usuario_id = req.user.id;
+      const usuario_id = req.usuario.id; // ✅ CAMBIO: req.user.id -> req.usuario.id
 
       // Validaciones
       if (!seccion_id || !publicacion_id) {
@@ -307,12 +315,14 @@ const seccionesController = {
       }
 
       res.json({
+        success: true, // ✅ AGREGADO
         mensaje: 'Post removido de la sección exitosamente'
       });
 
     } catch (error) {
       console.error('Error al quitar post de sección:', error);
       res.status(500).json({ 
+        success: false, // ✅ AGREGADO
         error: 'Error al quitar el post de la sección' 
       });
     }
@@ -322,7 +332,7 @@ const seccionesController = {
   obtenerSeccionesDePost: async (req, res) => {
     try {
       const { publicacion_id } = req.params;
-      const usuario_id = req.user.id;
+      const usuario_id = req.usuario.id; // ✅ CAMBIO: req.user.id -> req.usuario.id
 
       // Verificar que el post pertenece al usuario
       const postExiste = await PublicacionModel.existeYPerteneceAUsuario(
