@@ -27,7 +27,7 @@ class Usuario {
         SELECT 
           id, nombre_usuario, email, nombre_completo, biografia, ubicacion,
           carrera, foto_perfil_url, foto_portada_url, total_seguidores,
-          total_siguiendo, total_posts, activo, fecha_creacion
+          total_siguiendo, total_posts, activo, suspendido, fecha_creacion
         FROM usuarios 
         WHERE id = ? AND activo = 1
       `;
@@ -156,6 +156,86 @@ class Usuario {
     }
   }
   
+  // 🔒 SUSPENDER USUARIO (por exceso de reportes)
+  static async suspender(id) {
+    try {
+      const query = `
+        UPDATE usuarios 
+        SET suspendido = 1
+        WHERE id = ?
+      `;
+      
+      const [resultado] = await db.execute(query, [id]);
+      console.log(`🔒 Usuario ${id} suspendido`);
+      return resultado.affectedRows > 0;
+      
+    } catch (error) {
+      console.error('❌ Error en suspender:', error);
+      throw error;
+    }
+  }
+
+  // 🔓 LEVANTAR SUSPENSIÓN (por moderador)
+  static async levantarSuspension(id) {
+    try {
+      const query = `
+        UPDATE usuarios 
+        SET suspendido = 0
+        WHERE id = ?
+      `;
+      
+      const [resultado] = await db.execute(query, [id]);
+      console.log(`✅ Suspensión levantada para usuario ${id}`);
+      return resultado.affectedRows > 0;
+      
+    } catch (error) {
+      console.error('❌ Error en levantarSuspension:', error);
+      throw error;
+    }
+  }
+
+  // Verificar si usuario está suspendido
+  static async estaSuspendido(id) {
+    try {
+      const query = `
+        SELECT suspendido FROM usuarios WHERE id = ?
+      `;
+      
+      const [resultado] = await db.execute(query, [id]);
+      
+      if (resultado.length === 0) {
+        return false;
+      }
+      
+      return resultado[0].suspendido === 1;
+      
+    } catch (error) {
+      console.error('❌ Error en estaSuspendido:', error);
+      return false;
+    }
+  }
+
+  // Obtener usuarios suspendidos
+  static async obtenerSuspendidos() {
+    try {
+      const query = `
+        SELECT 
+          id, nombre_usuario, nombre_completo, email, 
+          suspendido, fecha_creacion
+        FROM usuarios 
+        WHERE suspendido = 1
+        ORDER BY fecha_creacion DESC
+      `;
+      
+      const [usuarios] = await db.execute(query);
+      return usuarios;
+      
+    } catch (error) {
+      console.error('❌ Error en obtenerSuspendidos:', error);
+      throw error;
+    }
+  }
+  
   // Buscar usuarios (búsqueda) - CORREGIDO
   static async buscar(termino, limite = 10) {
     try {
@@ -180,6 +260,7 @@ class Usuario {
         FROM usuarios 
         WHERE (nombre_usuario LIKE ? OR nombre_completo LIKE ? OR carrera LIKE ?)
         AND activo = 1
+        AND suspendido = 0
         LIMIT ${limiteSeguro}
       `;
       

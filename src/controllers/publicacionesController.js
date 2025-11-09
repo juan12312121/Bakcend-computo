@@ -1,7 +1,22 @@
 const Publicacion = require('../models/Publicacion');
+const Notificacion = require('../models/Notificacion');
 const { successResponse, errorResponse } = require('../utils/responses');
 
-// ✅ NUEVO: Endpoint para obtener categorías disponibles
+/**
+ * ============================================
+ * CONTROLADOR DE PUBLICACIONES
+ * ============================================
+ * Maneja todas las operaciones de publicaciones
+ * e integración con notificaciones
+ * ============================================
+ */
+
+/**
+ * ========================================
+ * OBTENER CATEGORÍAS DISPONIBLES
+ * ========================================
+ * GET /api/publicaciones/categorias
+ */
 exports.obtenerCategorias = async (req, res) => {
   try {
     const categorias = Publicacion.getCategorias();
@@ -12,7 +27,12 @@ exports.obtenerCategorias = async (req, res) => {
   }
 };
 
-// Crear nueva publicación
+/**
+ * ========================================
+ * CREAR PUBLICACIÓN
+ * ========================================
+ * POST /api/publicaciones
+ */
 exports.crearPublicacion = async (req, res) => {
   try {
     const { contenido, categoria } = req.body;
@@ -32,10 +52,11 @@ exports.crearPublicacion = async (req, res) => {
       contenido,
       imagen_url: req.file ? `/uploads/publicaciones/${req.file.filename}` : null,
       categoria: categoria || 'General'
-      // color_categoria se asigna automáticamente en el modelo
     });
 
     const publicacion = await Publicacion.obtenerPorId(nuevaPublicacionId);
+
+    console.log(`📝 Usuario ${req.usuario.id} creó publicación ${nuevaPublicacionId}`);
 
     return successResponse(res, publicacion, 'Publicación creada exitosamente', 201);
   } catch (error) {
@@ -44,9 +65,12 @@ exports.crearPublicacion = async (req, res) => {
   }
 };
 
-// Obtener todas las publicaciones (feed)
-// 🔧 REEMPLAZA la función obtenerPublicaciones en tu controlador
-
+/**
+ * ========================================
+ * OBTENER PUBLICACIONES (FEED)
+ * ========================================
+ * GET /api/publicaciones
+ */
 exports.obtenerPublicaciones = async (req, res) => {
   try {
     console.log('📍 Obteniendo publicaciones...');
@@ -90,7 +114,6 @@ exports.obtenerPublicaciones = async (req, res) => {
       return successResponse(res, publicaciones, 'Feed personalizado');
       
     } catch (feedError) {
-      // Si falla obtener el feed (ej: tabla seguidores no existe)
       console.warn('⚠️ Error al obtener feed personalizado:', feedError.message);
       console.log('🔄 Obteniendo todas las publicaciones como fallback');
       
@@ -107,7 +130,6 @@ exports.obtenerPublicaciones = async (req, res) => {
     console.error('❌ Error crítico al obtener publicaciones:', error);
     console.error('Stack:', error.stack);
     
-    // Intentar devolver algo en lugar de error 500
     try {
       const publicacionesBackup = await Publicacion.obtenerTodas();
       return successResponse(res, publicacionesBackup || [], 'Publicaciones (modo backup)');
@@ -118,7 +140,12 @@ exports.obtenerPublicaciones = async (req, res) => {
   }
 };
 
-// Obtener una publicación por ID
+/**
+ * ========================================
+ * OBTENER UNA PUBLICACIÓN POR ID
+ * ========================================
+ * GET /api/publicaciones/:id
+ */
 exports.obtenerPublicacion = async (req, res) => {
   try {
     const { id } = req.params;
@@ -135,6 +162,12 @@ exports.obtenerPublicacion = async (req, res) => {
   }
 };
 
+/**
+ * ========================================
+ * OBTENER MIS PUBLICACIONES
+ * ========================================
+ * GET /api/publicaciones/mis-publicaciones
+ */
 exports.obtenerMisPublicaciones = async (req, res) => {
   try {
     const publicaciones = await Publicacion.obtenerPorUsuario(req.usuario.id);
@@ -150,7 +183,12 @@ exports.obtenerMisPublicaciones = async (req, res) => {
   }
 };
 
-// Obtener publicaciones de otro usuario
+/**
+ * ========================================
+ * OBTENER PUBLICACIONES DE OTRO USUARIO
+ * ========================================
+ * GET /api/publicaciones/usuario/:usuarioId
+ */
 exports.obtenerPublicacionesUsuario = async (req, res) => {
   try {
     const { usuarioId } = req.params;
@@ -162,7 +200,12 @@ exports.obtenerPublicacionesUsuario = async (req, res) => {
   }
 };
 
-// Actualizar publicación
+/**
+ * ========================================
+ * ACTUALIZAR PUBLICACIÓN
+ * ========================================
+ * PUT /api/publicaciones/:id
+ */
 exports.actualizarPublicacion = async (req, res) => {
   try {
     const { id } = req.params;
@@ -188,6 +231,9 @@ exports.actualizarPublicacion = async (req, res) => {
     }
 
     const publicacionActualizada = await Publicacion.obtenerPorId(id);
+
+    console.log(`✏️ Usuario ${req.usuario.id} actualizó publicación ${id}`);
+
     return successResponse(res, publicacionActualizada, 'Publicación actualizada correctamente');
   } catch (error) {
     console.error('❌ Error al actualizar publicación:', error);
@@ -195,18 +241,52 @@ exports.actualizarPublicacion = async (req, res) => {
   }
 };
 
-// Eliminar publicación
+/**
+ * ========================================
+ * ELIMINAR PUBLICACIÓN
+ * ========================================
+ * DELETE /api/publicaciones/:id
+ * 
+ * ✅ Elimina la publicación Y todas sus notificaciones asociadas
+ */
 exports.eliminarPublicacion = async (req, res) => {
   try {
     const { id } = req.params;
 
+    // Verificar que la publicación existe y pertenece al usuario
+    const publicacion = await Publicacion.obtenerPorId(id);
+    
+    if (!publicacion) {
+      return errorResponse(res, 'Publicación no encontrada', 404);
+    }
+
+    if (publicacion.usuario_id !== req.usuario.id) {
+      return errorResponse(res, 'No tienes permiso para eliminar esta publicación', 403);
+    }
+
+    // ✅ ELIMINAR TODAS LAS NOTIFICACIONES ASOCIADAS
+    // (likes y comentarios de esta publicación)
+    const notificacionesEliminadas = await Notificacion.eliminarNotificacionesPublicacion(id);
+    console.log(`🔔 Eliminadas ${notificacionesEliminadas} notificaciones de publicación ${id}`);
+
+    // Eliminar la publicación
+    // (CASCADE eliminará automáticamente likes y comentarios si está configurado)
     const eliminado = await Publicacion.eliminar(id, req.usuario.id);
 
     if (!eliminado) {
       return errorResponse(res, 'No se pudo eliminar la publicación', 400);
     }
 
-    return successResponse(res, null, 'Publicación eliminada correctamente');
+    console.log(`🗑️ Usuario ${req.usuario.id} eliminó publicación ${id}`);
+
+    return successResponse(
+      res, 
+      { 
+        deleted: true,
+        notificacionesEliminadas 
+      }, 
+      'Publicación eliminada correctamente'
+    );
   } catch (error) {
     console.error('❌ Error al eliminar publicación:', error);
     return errorResponse(res, 'Error al eliminar publicación', 500);

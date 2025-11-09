@@ -10,6 +10,8 @@ const fotosRoutes = require('./fotos');
 const comentariosRoutes = require('./comentariosRoutes');
 const seccionesRoutes = require('./secciones');
 const likeRoutes = require('./like');
+const notificacionesRoutes = require('./notificacionesRoutes');
+const reporteRoutes = require('./reporteRoutes');
 
 // Usar rutas
 router.use('/auth', authRoutes);
@@ -20,5 +22,7 @@ router.use('/fotos', fotosRoutes);
 router.use('/comentarios', comentariosRoutes);
 router.use('/secciones', seccionesRoutes);
 router.use('/likes', likeRoutes);
+router.use('/notificaciones', notificacionesRoutes);
+router.use('/reportes', reporteRoutes);
 
 module.exports = router;

@@ -1,4 +1,5 @@
 const db = require('../config/database');
+const PublicacionOculta = require('./PublicacionOculta');
 
 class Publicacion {
     
@@ -9,7 +10,6 @@ class Publicacion {
       VALUES (?, ?, ?, ?, ?, ?)
     `;
 
-    // Mapeo automático de categoría a color
     const categoriaColores = {
       'General': 'bg-orange-500',
       'Tecnología': 'bg-teal-500',
@@ -38,20 +38,49 @@ class Publicacion {
   }
 
   static async obtenerTodas() {
-    const query = `
-      SELECT P.*, U.nombre_completo, U.nombre_usuario, U.foto_perfil_url
-      FROM publicaciones P
-      INNER JOIN usuarios U ON U.id = P.usuario_id
-      WHERE P.oculto = 0
-      ORDER BY P.fecha_creacion DESC
-    `;
-    const [filas] = await db.execute(query);
-    return filas;
+    try {
+      // Primero verificar si la columna suspendido existe
+      const checkColumn = `
+        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
+        WHERE TABLE_NAME = 'usuarios' AND COLUMN_NAME = 'suspendido'
+      `;
+      const [columnExists] = await db.execute(checkColumn);
+      
+      let query = `
+        SELECT P.*, U.nombre_completo, U.nombre_usuario, U.foto_perfil_url
+        FROM publicaciones P
+        INNER JOIN usuarios U ON U.id = P.usuario_id
+        WHERE P.oculto = 0
+      `;
+      
+      // Si la columna existe, excluir usuarios suspendidos
+      if (columnExists.length > 0) {
+        query += ` AND U.suspendido = 0`;
+      }
+      
+      query += ` ORDER BY P.fecha_creacion DESC LIMIT 100`;
+      
+      const [filas] = await db.execute(query);
+      return filas;
+    } catch (error) {
+      console.error('Error en obtenerTodas:', error);
+      // Fallback: obtener solo publicaciones no ocultas
+      const query = `
+        SELECT P.*, U.nombre_completo, U.nombre_usuario, U.foto_perfil_url
+        FROM publicaciones P
+        INNER JOIN usuarios U ON U.id = P.usuario_id
+        WHERE P.oculto = 0
+        ORDER BY P.fecha_creacion DESC
+        LIMIT 100
+      `;
+      const [filas] = await db.execute(query);
+      return filas;
+    }
   }
 
   static async obtenerPorId(id) {
     const query = `
-      SELECT P.*, U.nombre_usuario, U.nombre_completo, U.foto_perfil_url
+      SELECT P.*, U.nombre_usuario, U.nombre_completo, U.foto_perfil_url, U.suspendido
       FROM publicaciones P
       INNER JOIN usuarios U ON U.id = P.usuario_id
       WHERE P.id = ?
@@ -64,7 +93,6 @@ class Publicacion {
     const campos = [];
     const valores = [];
 
-    // Mapeo de categoría a color
     const categoriaColores = {
       'General': 'bg-orange-500',
       'Tecnología': 'bg-teal-500',
@@ -93,7 +121,6 @@ class Publicacion {
       campos.push('categoria = ?');
       valores.push(datos.categoria);
       
-      // Si cambia la categoría, actualizar el color automáticamente
       if (!datos.color_categoria) {
         campos.push('color_categoria = ?');
         valores.push(categoriaColores[datos.categoria] || 'bg-orange-500');
@@ -129,113 +156,158 @@ class Publicacion {
   }
 
   static async obtenerAleatorias(limit = 10) {
-    const query = `
-      SELECT P.*, U.nombre_completo, U.nombre_usuario, U.foto_perfil_url
-      FROM publicaciones P
-      INNER JOIN usuarios U ON U.id = P.usuario_id
-      WHERE P.oculto = 0
-      ORDER BY RAND()
-      LIMIT ?
-    `;
-    const [filas] = await db.execute(query, [limit]);
-    return filas;
-  }
-
- // 🔧 REEMPLAZA la función obtenerTodasParaUsuario en tu modelo
-
-static async obtenerTodasParaUsuario(usuarioId) {
-  try {
-    console.log('📱 Obteniendo feed para usuario:', usuarioId);
-    
-    // Primero verificar si la tabla seguidores existe
-    const checkTableQuery = `
-      SELECT COUNT(*) as count 
-      FROM information_schema.tables 
-      WHERE table_schema = DATABASE() 
-      AND table_name = 'seguidores'
-    `;
-    
-    const [tableCheck] = await db.execute(checkTableQuery);
-    
-    if (tableCheck[0].count === 0) {
-      console.warn('⚠️ Tabla seguidores no existe, mostrando todas las publicaciones');
-      return await this.obtenerTodas();
-    }
-    
-    // Obtener publicaciones del feed (seguidos + propias)
-    const query = `
-      SELECT DISTINCT P.*, U.nombre_completo, U.nombre_usuario, U.foto_perfil_url
-      FROM publicaciones P
-      INNER JOIN usuarios U ON U.id = P.usuario_id
-      WHERE P.oculto = 0
-        AND (
-          P.usuario_id = ?
-          OR P.usuario_id IN (
-            SELECT seguido_id 
-            FROM seguidores 
-            WHERE seguidor_id = ?
-          )
-        )
-      ORDER BY P.fecha_creacion DESC
-      LIMIT 100
-    `;
-    
-    const [filas] = await db.execute(query, [usuarioId, usuarioId]);
-    console.log('✅ Publicaciones encontradas:', filas.length);
-    
-    return filas;
-    
-  } catch (error) {
-    console.error('❌ Error en obtenerTodasParaUsuario:', error.message);
-    
-    // Si hay error con seguidores, devolver solo publicaciones propias + algunas aleatorias
-    console.log('🔄 Fallback: obteniendo publicaciones propias + aleatorias');
-    
     try {
-      const misPublicaciones = await this.obtenerPorUsuario(usuarioId);
-      const aleatorias = await this.obtenerAleatorias(20);
+      const checkColumn = `
+        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
+        WHERE TABLE_NAME = 'usuarios' AND COLUMN_NAME = 'suspendido'
+      `;
+      const [columnExists] = await db.execute(checkColumn);
       
-      // Combinar sin duplicados
-      const idsExistentes = new Set(misPublicaciones.map(p => p.id));
-      const nuevas = aleatorias.filter(p => !idsExistentes.has(p.id));
+      let query = `
+        SELECT P.*, U.nombre_completo, U.nombre_usuario, U.foto_perfil_url
+        FROM publicaciones P
+        INNER JOIN usuarios U ON U.id = P.usuario_id
+        WHERE P.oculto = 0
+      `;
       
-      return [...misPublicaciones, ...nuevas];
-    } catch (fallbackError) {
-      console.error('❌ Error en fallback:', fallbackError);
-      // Último recurso: todas las publicaciones
-      return await this.obtenerTodas();
+      if (columnExists.length > 0) {
+        query += ` AND U.suspendido = 0`;
+      }
+      
+      query += ` ORDER BY RAND() LIMIT ?`;
+      
+      const [filas] = await db.execute(query, [limit]);
+      return filas;
+    } catch (error) {
+      console.error('Error en obtenerAleatorias:', error);
+      const query = `
+        SELECT P.*, U.nombre_completo, U.nombre_usuario, U.foto_perfil_url
+        FROM publicaciones P
+        INNER JOIN usuarios U ON U.id = P.usuario_id
+        WHERE P.oculto = 0
+        ORDER BY RAND()
+        LIMIT ?
+      `;
+      const [filas] = await db.execute(query, [limit]);
+      return filas;
     }
   }
-}
 
-// También asegurémonos de que obtenerTodas tenga LIMIT
-static async obtenerTodas() {
-  const query = `
-    SELECT P.*, U.nombre_completo, U.nombre_usuario, U.foto_perfil_url
-    FROM publicaciones P
-    INNER JOIN usuarios U ON U.id = P.usuario_id
-    WHERE P.oculto = 0
-    ORDER BY P.fecha_creacion DESC
-    LIMIT 100
-  `;
-  const [filas] = await db.execute(query);
-  console.log('📚 Total publicaciones:', filas.length);
-  return filas;
-}
+  static async obtenerTodasParaUsuario(usuarioId) {
+    try {
+      console.log('📱 Obteniendo feed para usuario:', usuarioId);
+      
+      // Obtener IDs de publicaciones ocultas del usuario
+      const publicacionesOcultas = await PublicacionOculta.obtenerIdsPorUsuario(usuarioId);
+      let ocultasClause = '';
+      
+      if (publicacionesOcultas.length > 0) {
+        ocultasClause = `AND P.id NOT IN (${publicacionesOcultas.join(',')})`;
+      }
+      
+      const checkTableQuery = `
+        SELECT COUNT(*) as count 
+        FROM information_schema.tables 
+        WHERE table_schema = DATABASE() 
+        AND table_name = 'seguidores'
+      `;
+      
+      const [tableCheck] = await db.execute(checkTableQuery);
+      
+      if (tableCheck[0].count === 0) {
+        console.warn('⚠️ Tabla seguidores no existe');
+        const query = `
+          SELECT P.*, U.nombre_completo, U.nombre_usuario, U.foto_perfil_url
+          FROM publicaciones P
+          INNER JOIN usuarios U ON U.id = P.usuario_id
+          WHERE P.oculto = 0 AND U.suspendido = 0 ${ocultasClause}
+          ORDER BY P.fecha_creacion DESC
+          LIMIT 100
+        `;
+        const [filas] = await db.execute(query);
+        return filas;
+      }
+      
+      // Obtener publicaciones del feed (seguidos + propias) sin las ocultas ni de usuarios suspendidos
+      const query = `
+        SELECT DISTINCT P.*, U.nombre_completo, U.nombre_usuario, U.foto_perfil_url
+        FROM publicaciones P
+        INNER JOIN usuarios U ON U.id = P.usuario_id
+        WHERE P.oculto = 0
+          AND U.suspendido = 0
+          ${ocultasClause}
+          AND (
+            P.usuario_id = ?
+            OR P.usuario_id IN (
+              SELECT seguido_id 
+              FROM seguidores 
+              WHERE seguidor_id = ?
+            )
+          )
+        ORDER BY P.fecha_creacion DESC
+        LIMIT 100
+      `;
+      
+      const [filas] = await db.execute(query, [usuarioId, usuarioId]);
+      console.log('✅ Publicaciones encontradas:', filas.length);
+      
+      return filas;
+      
+    } catch (error) {
+      console.error('❌ Error en obtenerTodasParaUsuario:', error.message);
+      
+      try {
+        const misPublicaciones = await this.obtenerPorUsuario(usuarioId);
+        const aleatorias = await this.obtenerAleatorias(20);
+        
+        const idsExistentes = new Set(misPublicaciones.map(p => p.id));
+        const nuevas = aleatorias.filter(p => !idsExistentes.has(p.id));
+        
+        return [...misPublicaciones, ...nuevas];
+      } catch (fallbackError) {
+        console.error('❌ Error en fallback:', fallbackError);
+        return await this.obtenerTodas();
+      }
+    }
+  }
 
   static async obtenerPorUsuario(usuarioId) {
-    const query = `
-      SELECT P.*, U.nombre_completo, U.nombre_usuario, U.foto_perfil_url
-      FROM publicaciones P
-      INNER JOIN usuarios U ON U.id = P.usuario_id
-      WHERE P.oculto = 0 AND P.usuario_id = ?
-      ORDER BY P.fecha_creacion DESC
-    `;
-    const [filas] = await db.execute(query, [usuarioId]);
-    return filas;
+    try {
+      const checkColumn = `
+        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
+        WHERE TABLE_NAME = 'usuarios' AND COLUMN_NAME = 'suspendido'
+      `;
+      const [columnExists] = await db.execute(checkColumn);
+      
+      let query = `
+        SELECT P.*, U.nombre_completo, U.nombre_usuario, U.foto_perfil_url
+        FROM publicaciones P
+        INNER JOIN usuarios U ON U.id = P.usuario_id
+        WHERE P.oculto = 0 AND P.usuario_id = ?
+      `;
+      
+      if (columnExists.length > 0) {
+        query += ` AND U.suspendido = 0`;
+      }
+      
+      query += ` ORDER BY P.fecha_creacion DESC`;
+      
+      const [filas] = await db.execute(query, [usuarioId]);
+      return filas;
+    } catch (error) {
+      console.error('Error en obtenerPorUsuario:', error);
+      const query = `
+        SELECT P.*, U.nombre_completo, U.nombre_usuario, U.foto_perfil_url
+        FROM publicaciones P
+        INNER JOIN usuarios U ON U.id = P.usuario_id
+        WHERE P.oculto = 0 AND P.usuario_id = ?
+        ORDER BY P.fecha_creacion DESC
+      `;
+      const [filas] = await db.execute(query, [usuarioId]);
+      return filas;
+    }
   }
 
-  // ✅ NUEVO: Obtener lista de categorías disponibles
   static getCategorias() {
     return [
       { value: 'General', label: 'General', color: 'bg-orange-500' },

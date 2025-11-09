@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const likeController = require('../controllers/likeCotroller');
+const likeController = require('../controllers/likeController');
 const { proteger } = require('../middlewares/auth');
 
 /**

@@ -5,6 +5,9 @@ const fs = require('fs');
 const db = require('../config/database');
 const { proteger } = require('../middlewares/auth');
 
+// 🆕 Configuración de S3
+const S3_BUCKET_URL = 'https://redstudent-uploads.s3.us-east-2.amazonaws.com';
+
 /**
  * @route   GET /api/fotos/mis-fotos
  * @desc    Obtener TODAS las fotos del usuario (actuales + historial completo)
@@ -52,26 +55,18 @@ router.get('/mis-fotos', proteger, async (req, res) => {
       [usuario_id]
     );
 
-    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    // 🆕 Ya no usamos baseUrl local, usamos S3
+    // const baseUrl = `${req.protocol}://${req.get('host')}`;
 
     // 3️⃣ Obtener TODAS las fotos de perfil del usuario (historial completo)
-    const fotosPerfilHistorial = obtenerFotosHistorial('perfiles', usuario_id, baseUrl);
+    const fotosPerfilHistorial = obtenerFotosHistorial('perfil', usuario_id);
     
     // 4️⃣ Obtener TODAS las fotos de portada del usuario (historial completo)
-    const fotosPortadaHistorial = obtenerFotosHistorial('portadas', usuario_id, baseUrl);
+    const fotosPortadaHistorial = obtenerFotosHistorial('portadas', usuario_id);
 
     // 5️⃣ Identificar cuál es la foto actual de perfil y portada
-    const fotoPerfilActual = datosUsuario.foto_perfil_url
-      ? (datosUsuario.foto_perfil_url.startsWith('http')
-          ? datosUsuario.foto_perfil_url
-          : `${baseUrl}${datosUsuario.foto_perfil_url}`)
-      : null;
-
-    const fotoPortadaActual = datosUsuario.foto_portada_url
-      ? (datosUsuario.foto_portada_url.startsWith('http')
-          ? datosUsuario.foto_portada_url
-          : `${baseUrl}${datosUsuario.foto_portada_url}`)
-      : null;
+    const fotoPerfilActual = construirUrlS3(datosUsuario.foto_perfil_url, 'perfil');
+    const fotoPortadaActual = construirUrlS3(datosUsuario.foto_portada_url, 'portadas');
 
     // Marcar las fotos actuales en el historial
     fotosPerfilHistorial.forEach(foto => {
@@ -82,18 +77,14 @@ router.get('/mis-fotos', proteger, async (req, res) => {
       foto.es_actual = foto.url === fotoPortadaActual;
     });
 
-    // 6️⃣ Construcción de fotos de publicaciones
+    // 6️⃣ Construcción de fotos de publicaciones con URLs de S3
     const fotosPublicaciones = publicaciones.map(pub => {
       let urlImagen = null;
 
       if (pub.imagen_s3) {
-        urlImagen = pub.imagen_s3.startsWith('http')
-          ? pub.imagen_s3
-          : `${baseUrl}${pub.imagen_s3}`;
+        urlImagen = construirUrlS3(pub.imagen_s3, 'publicaciones');
       } else if (pub.imagen_url) {
-        urlImagen = pub.imagen_url.startsWith('http')
-          ? pub.imagen_url
-          : `${baseUrl}${pub.imagen_url}`;
+        urlImagen = construirUrlS3(pub.imagen_url, 'publicaciones');
       }
 
       return {
@@ -159,75 +150,84 @@ router.get('/mis-fotos', proteger, async (req, res) => {
 });
 
 /**
- * Función auxiliar para obtener todas las fotos de una carpeta del usuario
- * Funciona con ambos formatos:
- * - Nuevo: foto_perfil-{usuario_id}-{timestamp}.jpg
- * - Antiguo: foto_perfil-{timestamp}-{random}.jpg (devuelve todas sin filtrar)
+ * 🆕 Función auxiliar para construir URLs de S3
  */
-function obtenerFotosHistorial(carpeta, usuario_id, baseUrl) {
+function construirUrlS3(url, carpeta) {
+  if (!url) return null;
+  
+  // Si ya es una URL completa de S3, retornarla
+  if (url.includes('s3.us-east-2.amazonaws.com') || url.includes('s3.amazonaws.com')) {
+    return url;
+  }
+  
+  // Si es una URL completa de otro tipo, extraer solo el nombre del archivo
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    const match = url.match(/\/uploads\/[^\/]+\/(.+)$/);
+    if (match) {
+      return `${S3_BUCKET_URL}/uploads/${carpeta}/${match[1]}`;
+    }
+  }
+  
+  // Si es una ruta relativa /uploads/...
+  if (url.startsWith('/uploads/')) {
+    const fileName = url.split('/').pop();
+    return `${S3_BUCKET_URL}/uploads/${carpeta}/${fileName}`;
+  }
+  
+  // Si es solo el nombre del archivo
+  return `${S3_BUCKET_URL}/uploads/${carpeta}/${url}`;
+}
+
+/**
+ * 🆕 Función auxiliar para obtener todas las fotos de una carpeta del usuario
+ * Ahora devuelve URLs de S3 en lugar de URLs del servidor local
+ */
+function obtenerFotosHistorial(carpeta, usuario_id) {
   try {
-    // __dirname aquí es: /home/ubuntu/Bakcend-computo/src/routes
-    // Necesitamos subir un nivel y entrar a uploads: ../uploads
-    const uploadsBase = path.join(__dirname, '../uploads', carpeta);
+    // CORRECCIÓN: Mapear correctamente los nombres de carpetas
+    const carpetaMap = {
+      'perfil': 'perfiles',      // Mapear 'perfil' a 'perfiles'
+      'portadas': 'portadas'     // Mantener 'portadas' igual
+    };
+    
+    const carpetaReal = carpetaMap[carpeta] || carpeta;
+    const uploadsBase = path.join(__dirname, '../uploads', carpetaReal);
     
     console.log(`🔍 [DEBUG] Buscando fotos en: ${uploadsBase}`);
     console.log(`🔍 [DEBUG] Usuario ID: ${usuario_id}`);
-    console.log(`🔍 [DEBUG] Carpeta: ${carpeta}`);
+    console.log(`🔍 [DEBUG] Carpeta: ${carpetaReal}`);
     
-    // Verificar que la carpeta exista
     if (!fs.existsSync(uploadsBase)) {
       console.warn(`⚠️ Carpeta no encontrada: ${uploadsBase}`);
       return [];
     }
 
-    const tipo = carpeta === 'perfiles' ? 'perfil' : 'portada';
+    const tipo = carpeta === 'perfil' ? 'perfil' : 'portada';
     console.log(`🔍 [DEBUG] Tipo de foto: ${tipo}`);
     
-    // Leer TODOS los archivos primero (sin filtrar)
     const todosLosArchivos = fs.readdirSync(uploadsBase);
     console.log(`🔍 [DEBUG] Total archivos en carpeta: ${todosLosArchivos.length}`);
-    console.log(`🔍 [DEBUG] Archivos encontrados:`, todosLosArchivos);
     
-    // Leer todos los archivos de la carpeta
     const archivos = todosLosArchivos
       .filter(archivo => {
-        console.log(`🔍 [DEBUG] Procesando archivo: ${archivo}`);
-        
-        // Filtrar solo archivos de imagen válidos
         const esImagen = /\.(jpg|jpeg|png|gif|webp)$/i.test(archivo);
-        console.log(`  - ¿Es imagen?: ${esImagen}`);
-        
         if (!esImagen) return false;
         
-        // Patrón NUEVO: foto_perfil-{usuario_id}-{timestamp}.ext
         const patronNuevo = new RegExp(`foto_${tipo}-(\\d+)-(\\d+)\\.(jpg|jpeg|png|gif|webp)`, 'i');
         const matchNuevo = archivo.match(patronNuevo);
         
-        console.log(`  - Patrón buscado: foto_${tipo}-(\\d+)-(\\d+)`);
-        console.log(`  - ¿Coincide patrón?: ${matchNuevo ? 'SÍ' : 'NO'}`);
-        
         if (matchNuevo) {
           const archivoUsuarioId = matchNuevo[1];
-          const timestamp = matchNuevo[2];
-          
-          console.log(`  - Usuario ID en archivo: ${archivoUsuarioId}`);
-          console.log(`  - Timestamp: ${timestamp}`);
-          console.log(`  - ¿Coincide usuario?: ${archivoUsuarioId == usuario_id}`);
           
           // Si el primer número coincide con usuario_id, es formato nuevo
           if (archivoUsuarioId == usuario_id) {
-            console.log(`  ✅ INCLUIDO - Formato nuevo del usuario`);
             return true;
           }
           
           // Si el primer número es muy grande (timestamp), es formato antiguo
-          // Timestamps > 1600000000000 (año 2020)
           if (parseInt(archivoUsuarioId) > 1600000000000) {
-            console.log(`  ✅ INCLUIDO - Archivo formato antiguo`);
-            return true; // Incluir archivos antiguos sin filtro
+            return true;
           }
-          
-          console.log(`  ❌ EXCLUIDO - No cumple criterios`);
         }
         
         return false;
@@ -236,7 +236,6 @@ function obtenerFotosHistorial(carpeta, usuario_id, baseUrl) {
         const rutaCompleta = path.join(uploadsBase, archivo);
         const stats = fs.statSync(rutaCompleta);
         
-        // Extraer datos del nombre: foto_perfil-{num1}-{num2}.ext
         const regex = new RegExp(`foto_${tipo}-(\\d+)-(\\d+)\\.`, 'i');
         const match = archivo.match(regex);
         
@@ -247,13 +246,10 @@ function obtenerFotosHistorial(carpeta, usuario_id, baseUrl) {
           const num1 = parseInt(match[1]);
           const num2 = parseInt(match[2]);
           
-          // Determinar si es formato nuevo o antiguo
           if (num1 == usuario_id) {
-            // Formato nuevo: foto_perfil-{usuario_id}-{timestamp}.ext
             timestamp = num2;
             esFormatoNuevo = true;
           } else {
-            // Formato antiguo: foto_perfil-{timestamp}-{random}.ext
             timestamp = num1;
             esFormatoNuevo = false;
           }
@@ -261,20 +257,21 @@ function obtenerFotosHistorial(carpeta, usuario_id, baseUrl) {
           timestamp = stats.birthtimeMs;
         }
         
+        // 🆕 Construir URL de S3 en lugar de URL local
         return {
           nombre: archivo,
-          url: `${baseUrl}/uploads/${carpeta}/${archivo}`,
+          url: `${S3_BUCKET_URL}/${carpetaReal}/${archivo}`,
           fecha: new Date(timestamp),
           tamaño: stats.size,
           tipo: tipo,
-          es_actual: false, // Se marcará después si es la foto actual
+          es_actual: false,
           formato: esFormatoNuevo ? 'nuevo' : 'antiguo'
         };
       })
-      .sort((a, b) => b.fecha - a.fecha); // Ordenar por fecha descendente
+      .sort((a, b) => b.fecha - a.fecha);
 
-    console.log(`✅ Total de fotos de ${tipo} encontradas para usuario ${usuario_id}: ${archivos.length}`);
-    console.log(`📋 Fotos resultantes:`, archivos.map(a => a.nombre));
+    console.log(`✅ Total de fotos de ${tipo} encontradas: ${archivos.length}`);
+    console.log(`📋 URLs de S3 generadas:`, archivos.slice(0, 3).map(a => a.url));
     
     return archivos;
   } catch (error) {
@@ -294,7 +291,6 @@ router.get('/usuario/:usuario_id', async (req, res) => {
     connection = await db.getConnection();
     const { usuario_id } = req.params;
 
-    // 1️⃣ Obtener datos del usuario
     const [usuario] = await connection.execute(
       `SELECT 
         foto_perfil_url,
@@ -315,7 +311,6 @@ router.get('/usuario/:usuario_id', async (req, res) => {
 
     const datosUsuario = usuario[0];
 
-    // 2️⃣ Obtener fotos de publicaciones
     const [publicaciones] = await connection.execute(
       `SELECT 
         id,
@@ -330,28 +325,12 @@ router.get('/usuario/:usuario_id', async (req, res) => {
       [usuario_id]
     );
 
-    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    const fotosPerfilHistorial = obtenerFotosHistorial('perfil', usuario_id);
+    const fotosPortadaHistorial = obtenerFotosHistorial('portadas', usuario_id);
 
-    // 3️⃣ Obtener TODAS las fotos de perfil del usuario (historial completo)
-    const fotosPerfilHistorial = obtenerFotosHistorial('perfiles', usuario_id, baseUrl);
-    
-    // 4️⃣ Obtener TODAS las fotos de portada del usuario (historial completo)
-    const fotosPortadaHistorial = obtenerFotosHistorial('portadas', usuario_id, baseUrl);
+    const fotoPerfilActual = construirUrlS3(datosUsuario.foto_perfil_url, 'perfil');
+    const fotoPortadaActual = construirUrlS3(datosUsuario.foto_portada_url, 'portadas');
 
-    // 5️⃣ Identificar cuál es la foto actual de perfil y portada
-    const fotoPerfilActual = datosUsuario.foto_perfil_url
-      ? (datosUsuario.foto_perfil_url.startsWith('http')
-          ? datosUsuario.foto_perfil_url
-          : `${baseUrl}${datosUsuario.foto_perfil_url}`)
-      : null;
-
-    const fotoPortadaActual = datosUsuario.foto_portada_url
-      ? (datosUsuario.foto_portada_url.startsWith('http')
-          ? datosUsuario.foto_portada_url
-          : `${baseUrl}${datosUsuario.foto_portada_url}`)
-      : null;
-
-    // Marcar las fotos actuales en el historial
     fotosPerfilHistorial.forEach(foto => {
       foto.es_actual = foto.url === fotoPerfilActual;
     });
@@ -360,18 +339,13 @@ router.get('/usuario/:usuario_id', async (req, res) => {
       foto.es_actual = foto.url === fotoPortadaActual;
     });
 
-    // 6️⃣ Construcción de fotos de publicaciones
     const fotosPublicaciones = publicaciones.map(pub => {
       let urlImagen = null;
 
       if (pub.imagen_s3) {
-        urlImagen = pub.imagen_s3.startsWith('http')
-          ? pub.imagen_s3
-          : `${baseUrl}${pub.imagen_s3}`;
+        urlImagen = construirUrlS3(pub.imagen_s3, 'publicaciones');
       } else if (pub.imagen_url) {
-        urlImagen = pub.imagen_url.startsWith('http')
-          ? pub.imagen_url
-          : `${baseUrl}${pub.imagen_url}`;
+        urlImagen = construirUrlS3(pub.imagen_url, 'publicaciones');
       }
 
       return {
@@ -385,7 +359,6 @@ router.get('/usuario/:usuario_id', async (req, res) => {
       };
     });
 
-    // 7️⃣ Enviar respuesta con historial completo (igual que /mis-fotos)
     res.json({
       success: true,
       data: {
@@ -394,7 +367,6 @@ router.get('/usuario/:usuario_id', async (req, res) => {
           nombre_usuario: datosUsuario.nombre_usuario
         },
         fotos: {
-          // Fotos actuales
           perfil_actual: fotoPerfilActual ? { 
             url: fotoPerfilActual, 
             tipo: 'perfil',
@@ -405,14 +377,8 @@ router.get('/usuario/:usuario_id', async (req, res) => {
             tipo: 'portada',
             es_actual: true 
           } : null,
-          
-          // Historial completo de fotos de perfil
           perfil_historial: fotosPerfilHistorial,
-          
-          // Historial completo de fotos de portada
           portada_historial: fotosPortadaHistorial,
-          
-          // Fotos de publicaciones
           publicaciones: fotosPublicaciones
         },
         estadisticas: {
@@ -437,51 +403,6 @@ router.get('/usuario/:usuario_id', async (req, res) => {
 });
 
 /**
- * @route   GET /api/fotos/verificar/:tipo/:filename
- * @desc    Verificar si una foto existe físicamente
- * @access  Public
- */
-router.get('/verificar/:tipo/:filename', (req, res) => {
-  try {
-    const { tipo, filename } = req.params;
-    const uploadsBase = path.join(__dirname, '../uploads');
-    let carpeta;
-
-    switch (tipo) {
-      case 'perfil': carpeta = 'perfiles'; break;
-      case 'portada': carpeta = 'portadas'; break;
-      case 'publicacion': carpeta = 'publicaciones'; break;
-      default:
-        return res.status(400).json({
-          success: false,
-          mensaje: 'Tipo de foto inválido. Use: perfil, portada o publicacion'
-        });
-    }
-
-    const rutaArchivo = path.join(uploadsBase, carpeta, filename);
-    const existe = fs.existsSync(rutaArchivo);
-
-    res.json({
-      success: true,
-      data: {
-        existe,
-        ruta: `/uploads/${carpeta}/${filename}`,
-        url_completa: `${req.protocol}://${req.get('host')}/uploads/${carpeta}/${filename}`,
-        tipo,
-        filename
-      }
-    });
-  } catch (error) {
-    console.error('❌ Error al verificar archivo:', error);
-    res.status(500).json({
-      success: false,
-      mensaje: 'Error al verificar el archivo',
-      error: error.message
-    });
-  }
-});
-
-/**
  * @route   GET /api/fotos/historial/:tipo
  * @desc    Obtener historial de fotos de perfil o portada
  * @access  Private
@@ -498,10 +419,8 @@ router.get('/historial/:tipo', proteger, async (req, res) => {
       });
     }
 
-    const carpeta = tipo === 'perfil' ? 'perfiles' : 'portadas';
-    const baseUrl = `${req.protocol}://${req.get('host')}`;
-    
-    const fotos = obtenerFotosHistorial(carpeta, usuario_id, baseUrl);
+    const carpeta = tipo === 'perfil' ? 'perfil' : 'portadas';
+    const fotos = obtenerFotosHistorial(carpeta, usuario_id);
 
     res.json({
       success: true,
@@ -541,10 +460,11 @@ router.delete('/eliminar/:tipo/:filename', proteger, async (req, res) => {
     }
 
     const carpetaMap = {
-      perfil: 'perfiles',
-      portada: 'portadas',
-      publicacion: 'publicaciones'
-    };
+  perfil: 'perfiles',
+  portada: 'portadas',
+  publicacion: 'publicaciones'
+};
+
 
     const carpeta = carpetaMap[tipo];
     const rutaArchivo = path.join(__dirname, '../uploads', carpeta, filename);
@@ -592,17 +512,5 @@ router.delete('/eliminar/:tipo/:filename', proteger, async (req, res) => {
     if (connection) connection.release();
   }
 });
-
-// 🔍 Función auxiliar para verificar existencia de archivos
-function verificarArchivoExiste(urlRelativa) {
-  try {
-    if (!urlRelativa || urlRelativa.startsWith('http')) return true;
-    const uploadsBase = path.join(__dirname, '../uploads');
-    const rutaCompleta = path.join(uploadsBase, urlRelativa.replace('/uploads/', ''));
-    return fs.existsSync(rutaCompleta);
-  } catch {
-    return false;
-  }
-}
 
 module.exports = router;
