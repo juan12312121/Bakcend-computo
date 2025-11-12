@@ -179,7 +179,7 @@ function construirUrlS3(url, carpeta) {
 }
 
 /**
- * 🆕 Función auxiliar para obtener todas las fotos de una carpeta del usuario
+ *  Función auxiliar para obtener todas las fotos de una carpeta del usuario
  * Ahora devuelve URLs de S3 en lugar de URLs del servidor local
  */
 function obtenerFotosHistorial(carpeta, usuario_id) {

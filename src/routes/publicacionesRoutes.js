@@ -1,30 +1,14 @@
 const express = require('express');
 const router = express.Router();
-const multer = require('multer');
-const path = require('path');
 const { proteger } = require('../middlewares/auth');
 const publicacionController = require('../controllers/publicacionesController');
+const { upload } = require('../config/aws'); // ← usa el upload de S3
 
-// Configuración de Multer
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, path.join(__dirname, '../uploads/publicaciones'));
-  },
-  filename: (req, file, cb) => {
-    const nombreArchivo = `${Date.now()}-${file.originalname}`;
-    cb(null, nombreArchivo);
-  }
-});
-const upload = multer({ storage });
+// ⚠️ Rutas específicas ANTES de rutas con parámetros
+router.get('/categorias', publicacionController.obtenerCategorias);
 
-// ⚠️ IMPORTANTE: Rutas específicas ANTES de rutas con parámetros
-router.get('/categorias', publicacionController.obtenerCategorias); 
-
-// 🔧 TEMPORAL: Quitar middleware hasta arreglar el backend
-// Cambiar de:
-// router.get('/', protegerOpcional, publicacionController.obtenerPublicaciones);
-// A:
-router.get('/', publicacionController.obtenerPublicaciones); 
+// 🔧 Temporal: sin middleware opcional hasta estabilizar backend
+router.get('/', publicacionController.obtenerPublicaciones);
 
 router.post('/', proteger, upload.single('imagen'), publicacionController.crearPublicacion);
 router.get('/mis-publicaciones', proteger, publicacionController.obtenerMisPublicaciones);

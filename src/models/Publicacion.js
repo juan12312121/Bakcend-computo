@@ -156,42 +156,36 @@ class Publicacion {
   }
 
   static async obtenerAleatorias(limit = 10) {
-    try {
-      const checkColumn = `
-        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
-        WHERE TABLE_NAME = 'usuarios' AND COLUMN_NAME = 'suspendido'
-      `;
-      const [columnExists] = await db.execute(checkColumn);
-      
-      let query = `
-        SELECT P.*, U.nombre_completo, U.nombre_usuario, U.foto_perfil_url
-        FROM publicaciones P
-        INNER JOIN usuarios U ON U.id = P.usuario_id
-        WHERE P.oculto = 0
-      `;
-      
-      if (columnExists.length > 0) {
-        query += ` AND U.suspendido = 0`;
-      }
-      
-      query += ` ORDER BY RAND() LIMIT ?`;
-      
-      const [filas] = await db.execute(query, [limit]);
-      return filas;
-    } catch (error) {
-      console.error('Error en obtenerAleatorias:', error);
-      const query = `
-        SELECT P.*, U.nombre_completo, U.nombre_usuario, U.foto_perfil_url
-        FROM publicaciones P
-        INNER JOIN usuarios U ON U.id = P.usuario_id
-        WHERE P.oculto = 0
-        ORDER BY RAND()
-        LIMIT ?
-      `;
-      const [filas] = await db.execute(query, [limit]);
-      return filas;
+  try {
+    const limitNum = parseInt(limit) || 10;
+    
+    const checkColumn = `
+      SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
+      WHERE TABLE_NAME = 'usuarios' AND COLUMN_NAME = 'suspendido'
+    `;
+    const [columnExists] = await db.execute(checkColumn);
+
+    let query = `
+      SELECT P.*, U.nombre_completo, U.nombre_usuario, U.foto_perfil_url
+      FROM publicaciones P
+      INNER JOIN usuarios U ON U.id = P.usuario_id
+      WHERE P.oculto = 0
+    `;
+
+    if (columnExists.length > 0) {
+      query += ` AND U.suspendido = 0`;
     }
+
+    // ✅ interpolar el valor validado en la consulta
+    query += ` ORDER BY RAND() LIMIT ${limitNum}`;
+
+    const [filas] = await db.execute(query);
+    return filas;
+  } catch (error) {
+    console.error('Error en obtenerAleatorias:', error);
+    throw error;
   }
+}
 
   static async obtenerTodasParaUsuario(usuarioId) {
     try {

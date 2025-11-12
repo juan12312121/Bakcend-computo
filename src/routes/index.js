@@ -12,6 +12,7 @@ const seccionesRoutes = require('./secciones');
 const likeRoutes = require('./like');
 const notificacionesRoutes = require('./notificacionesRoutes');
 const reporteRoutes = require('./reporteRoutes');
+const documentosRoutes = require('./documentos');
 
 // Usar rutas
 router.use('/auth', authRoutes);
@@ -24,5 +25,6 @@ router.use('/secciones', seccionesRoutes);
 router.use('/likes', likeRoutes);
 router.use('/notificaciones', notificacionesRoutes);
 router.use('/reportes', reporteRoutes);
+router.use('/documentos', documentosRoutes);
 
 module.exports = router;

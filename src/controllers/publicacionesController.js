@@ -41,22 +41,24 @@ exports.crearPublicacion = async (req, res) => {
       return errorResponse(res, 'El contenido es obligatorio', 400);
     }
 
-    // Validar categoría si se proporciona
     const categoriasValidas = Publicacion.getCategorias().map(c => c.value);
     if (categoria && !categoriasValidas.includes(categoria)) {
       return errorResponse(res, `Categoría inválida. Debe ser una de: ${categoriasValidas.join(', ')}`, 400);
     }
 
+    // ✅ CORREGIDO: Usar imagen_s3 en lugar de imagen_url
     const nuevaPublicacionId = await Publicacion.crear({
       usuario_id: req.usuario.id,
       contenido,
-      imagen_url: req.file ? `/uploads/publicaciones/${req.file.filename}` : null,
+      imagen_url: null,  // ← Dejar como null
+      imagen_s3: req.file ? req.file.location : null,  // ← Usar .location de S3
       categoria: categoria || 'General'
     });
 
     const publicacion = await Publicacion.obtenerPorId(nuevaPublicacionId);
 
     console.log(`📝 Usuario ${req.usuario.id} creó publicación ${nuevaPublicacionId}`);
+    console.log(`📤 Imagen S3: ${req.file ? req.file.location : 'sin imagen'}`);
 
     return successResponse(res, publicacion, 'Publicación creada exitosamente', 201);
   } catch (error) {
@@ -206,6 +208,39 @@ exports.obtenerPublicacionesUsuario = async (req, res) => {
  * ========================================
  * PUT /api/publicaciones/:id
  */
+exports.crearPublicacion = async (req, res) => {
+  try {
+    const { contenido, categoria } = req.body;
+
+    if (!contenido) {
+      return errorResponse(res, 'El contenido es obligatorio', 400);
+    }
+
+    const categoriasValidas = Publicacion.getCategorias().map(c => c.value);
+    if (categoria && !categoriasValidas.includes(categoria)) {
+      return errorResponse(res, `Categoría inválida. Debe ser una de: ${categoriasValidas.join(', ')}`, 400);
+    }
+
+    const nuevaPublicacionId = await Publicacion.crear({
+      usuario_id: req.usuario.id,
+      contenido,
+      imagen_url: null,
+      imagen_s3: req.file ? req.file.location : null,
+      categoria: categoria || 'General'
+    });
+
+    const publicacion = await Publicacion.obtenerPorId(nuevaPublicacionId);
+
+    console.log(`📝 Usuario ${req.usuario.id} creó publicación ${nuevaPublicacionId}`);
+    console.log(`📤 Imagen S3: ${req.file ? req.file.location : 'sin imagen'}`);
+
+    return successResponse(res, publicacion, 'Publicación creada exitosamente', 201);
+  } catch (error) {
+    console.error('❌ Error al crear publicación:', error);
+    return errorResponse(res, 'Error al crear publicación', 500);
+  }
+};
+
 exports.actualizarPublicacion = async (req, res) => {
   try {
     const { id } = req.params;
@@ -221,7 +256,8 @@ exports.actualizarPublicacion = async (req, res) => {
 
     const datosActualizar = { contenido, categoria };
     if (req.file) {
-      datosActualizar.imagen_url = `/uploads/publicaciones/${req.file.filename}`;
+      datosActualizar.imagen_s3 = req.file.location;
+      datosActualizar.imagen_url = null;
     }
 
     const actualizado = await Publicacion.actualizar(id, req.usuario.id, datosActualizar);
@@ -233,6 +269,7 @@ exports.actualizarPublicacion = async (req, res) => {
     const publicacionActualizada = await Publicacion.obtenerPorId(id);
 
     console.log(`✏️ Usuario ${req.usuario.id} actualizó publicación ${id}`);
+    console.log(`📤 Imagen S3: ${req.file ? req.file.location : 'sin cambios'}`);
 
     return successResponse(res, publicacionActualizada, 'Publicación actualizada correctamente');
   } catch (error) {
