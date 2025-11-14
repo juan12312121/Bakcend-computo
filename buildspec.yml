@@ -1,0 +1,18 @@
+version: 0.2
+
+phases:
+  install:
+    commands:
+      - echo "Instalando dependencias"
+      - npm ci
+  build:
+    commands:
+      - echo "No se requiere build para Node.js estándar"
+  post_build:
+    commands:
+      - echo "Build completado exitosamente"
+
+artifacts:
+  files:
+    - '**/*'
+  discard-paths: no
