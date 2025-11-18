@@ -18,7 +18,7 @@ const NotificacionController = {
    * ========================================
    * GET /api/notificaciones?limit=20&offset=0
    */
-  async obtenerTodas(req, res) {
+  obtenerTodas: async (req, res) => {
     try {
       const usuario_id = req.usuario.id;
       const { limit = 20, offset = 0 } = req.query;
@@ -55,7 +55,7 @@ const NotificacionController = {
    * ========================================
    * GET /api/notificaciones/no-leidas
    */
-  async obtenerNoLeidas(req, res) {
+  obtenerNoLeidas: async (req, res) => {
     try {
       const usuario_id = req.usuario.id;
 
@@ -87,7 +87,7 @@ const NotificacionController = {
    * 
    * Útil para mostrar el badge en el icono de notificaciones
    */
-  async contarNoLeidas(req, res) {
+  contarNoLeidas: async (req, res) => {
     try {
       const usuario_id = req.usuario.id;
 
@@ -112,7 +112,7 @@ const NotificacionController = {
    * ========================================
    * PUT /api/notificaciones/:id/leer
    */
-  async marcarComoLeida(req, res) {
+  marcarComoLeida: async (req, res) => {
     try {
       const { id } = req.params;
       const usuario_id = req.usuario.id;
@@ -144,7 +144,7 @@ const NotificacionController = {
    * ========================================
    * PUT /api/notificaciones/leer-todas
    */
-  async marcarTodasComoLeidas(req, res) {
+  marcarTodasComoLeidas: async (req, res) => {
     try {
       const usuario_id = req.usuario.id;
 
@@ -176,7 +176,7 @@ const NotificacionController = {
    * ========================================
    * DELETE /api/notificaciones/:id
    */
-  async eliminar(req, res) {
+  eliminar: async (req, res) => {
     try {
       const { id } = req.params;
       const usuario_id = req.usuario.id;
@@ -211,7 +211,7 @@ const NotificacionController = {
    * Elimina notificaciones con más de 30 días
    * Solo para administradores o tareas programadas
    */
-  async limpiarAntiguas(req, res) {
+  limpiarAntiguas: async (req, res) => {
     try {
       const totalEliminadas = await Notificacion.limpiarAntiguas();
 
@@ -236,5 +236,12 @@ const NotificacionController = {
   }
 };
 
-// ✅ CORREGIDO: Exportar con el nombre correcto
+/**
+ * ============================================
+ * EXPORTAR CONTROLADOR
+ * ============================================
+ * ⚠️ IMPORTANTE: Solo exportar el objeto con funciones
+ * NO incluir código de rutas (router.get, router.post, etc.)
+ * Las rutas van en el archivo de rutas, no aquí
+ */
 module.exports = NotificacionController;

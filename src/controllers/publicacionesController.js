@@ -1,20 +1,18 @@
 const Publicacion = require('../models/Publicacion');
+const Documento = require('../models/Documento');
 const Notificacion = require('../models/Notificacion');
+const CensuraPublicaciones = require('../services/CensuraPublicaciones');
+const { deleteFromS3 } = require('../config/aws');
 const { successResponse, errorResponse } = require('../utils/responses');
 
 /**
  * ============================================
- * CONTROLADOR DE PUBLICACIONES
- * ============================================
- * Maneja todas las operaciones de publicaciones
- * e integración con notificaciones
+ * CONTROLADOR DE PUBLICACIONES CON CENSURA + DOCUMENTOS
  * ============================================
  */
 
 /**
- * ========================================
  * OBTENER CATEGORÍAS DISPONIBLES
- * ========================================
  * GET /api/publicaciones/categorias
  */
 exports.obtenerCategorias = async (req, res) => {
@@ -22,103 +20,252 @@ exports.obtenerCategorias = async (req, res) => {
     const categorias = Publicacion.getCategorias();
     return successResponse(res, categorias, 'Lista de categorías disponibles');
   } catch (error) {
-    console.error('❌ Error al obtener categorías:', error);
     return errorResponse(res, 'Error al obtener categorías', 500);
   }
 };
 
 /**
- * ========================================
- * CREAR PUBLICACIÓN
- * ========================================
+ * 🆕 CREAR PUBLICACIÓN - CON IMAGEN Y DOCUMENTOS
  * POST /api/publicaciones
  */
 exports.crearPublicacion = async (req, res) => {
+  let imagenSubida = false;
+  let documentosSubidos = [];
+  
   try {
     const { contenido, categoria } = req.body;
 
-    if (!contenido) {
+    // Validar contenido
+    if (!contenido || contenido.trim().length === 0) {
+      // Limpiar archivos subidos
+      if (req.files?.imagen?.[0]) {
+        await deleteFromS3(req.files.imagen[0].location).catch(() => {});
+      }
+      if (req.files?.documentos) {
+        for (const doc of req.files.documentos) {
+          await deleteFromS3(doc.location).catch(() => {});
+        }
+      }
       return errorResponse(res, 'El contenido es obligatorio', 400);
     }
 
-    const categoriasValidas = Publicacion.getCategorias().map(c => c.value);
-    if (categoria && !categoriasValidas.includes(categoria)) {
-      return errorResponse(res, `Categoría inválida. Debe ser una de: ${categoriasValidas.join(', ')}`, 400);
+    if (contenido.length > 5000) {
+      if (req.files?.imagen?.[0]) {
+        await deleteFromS3(req.files.imagen[0].location).catch(() => {});
+      }
+      if (req.files?.documentos) {
+        for (const doc of req.files.documentos) {
+          await deleteFromS3(doc.location).catch(() => {});
+        }
+      }
+      return errorResponse(res, 'La publicación no puede exceder 5000 caracteres', 400);
     }
 
-    // ✅ CORREGIDO: Usar imagen_s3 en lugar de imagen_url
+    // Validar categoría
+    const categoriasValidas = Publicacion.getCategorias().map(c => c.value);
+    if (categoria && !categoriasValidas.includes(categoria)) {
+      if (req.files?.imagen?.[0]) {
+        await deleteFromS3(req.files.imagen[0].location).catch(() => {});
+      }
+      if (req.files?.documentos) {
+        for (const doc of req.files.documentos) {
+          await deleteFromS3(doc.location).catch(() => {});
+        }
+      }
+      return errorResponse(
+        res, 
+        `Categoría inválida. Debe ser una de: ${categoriasValidas.join(', ')}`, 
+        400
+      );
+    }
+
+    // 🔍 ANÁLISIS DE CENSURA - CONTENIDO
+    const analisisContenido = await CensuraPublicaciones.validarContenido(
+      contenido, 
+      categoria || 'General'
+    );
+
+    if (!analisisContenido.valido || analisisContenido.accion === 'rechazar') {
+      if (req.files?.imagen?.[0]) {
+        await deleteFromS3(req.files.imagen[0].location).catch(() => {});
+      }
+      if (req.files?.documentos) {
+        for (const doc of req.files.documentos) {
+          await deleteFromS3(doc.location).catch(() => {});
+        }
+      }
+      
+      return errorResponse(
+        res,
+        `Tu publicación fue rechazada: ${analisisContenido.razon}`,
+        403,
+        {
+          motivo: analisisContenido.razon,
+          confianza: analisisContenido.confianza,
+          detalles: {
+            contenido: analisisContenido.problemas,
+            imagen: []
+          }
+        }
+      );
+    }
+
+    // Marcar imagen como subida
+    if (req.files?.imagen?.[0]) {
+      imagenSubida = true;
+    }
+
+    // 🔍 ANÁLISIS DE CENSURA - IMAGEN
+    let analisisImagen = null;
+    if (req.files?.imagen?.[0]) {
+      analisisImagen = await CensuraPublicaciones.validarImagenDescripcion(
+        req.files.imagen[0].location,
+        contenido
+      );
+
+      if (!analisisImagen.apropiada || analisisImagen.accion === 'rechazar') {
+        await deleteFromS3(req.files.imagen[0].location).catch(() => {});
+        
+        if (req.files?.documentos) {
+          for (const doc of req.files.documentos) {
+            await deleteFromS3(doc.location).catch(() => {});
+          }
+        }
+        
+        return errorResponse(
+          res,
+          `Tu imagen fue rechazada: ${analisisImagen.razon}`,
+          403,
+          {
+            motivo: analisisImagen.razon,
+            confianza: analisisImagen.confianza,
+            detalles: {
+              contenido: [],
+              imagen: analisisImagen.problemas
+            }
+          }
+        );
+      }
+    }
+
+    // Generar reporte de censura
+    const reporte = await CensuraPublicaciones.generarReporte(
+      null,
+      req.usuario.id,
+      analisisContenido,
+      analisisImagen
+    );
+
+    let requiereRevision = false;
+    if (reporte.estadoFinal.estado === 'REQUIERE_REVISION') {
+      requiereRevision = true;
+    }
+
+    // 📝 CREAR PUBLICACIÓN EN BD
     const nuevaPublicacionId = await Publicacion.crear({
       usuario_id: req.usuario.id,
       contenido,
-      imagen_url: null,  // ← Dejar como null
-      imagen_s3: req.file ? req.file.location : null,  // ← Usar .location de S3
-      categoria: categoria || 'General'
+      imagen_url: null,
+      imagen_s3: req.files?.imagen?.[0]?.location || null,
+      categoria: categoria || 'General',
+      requiere_revision: requiereRevision ? 1 : 0,
+      analisis_censura: JSON.stringify(reporte)
     });
 
+    // 🆕 GUARDAR DOCUMENTOS EN BD
+    if (req.files?.documentos && req.files.documentos.length > 0) {
+      for (const doc of req.files.documentos) {
+        try {
+          const { icono, color } = Documento.obtenerIconoYColor(doc.mimetype);
+          
+          const documentoId = await Documento.crear({
+            usuario_id: req.usuario.id,
+            publicacion_id: nuevaPublicacionId,
+            documento_url: null,
+            documento_s3: doc.location,
+            nombre_archivo: doc.originalname,
+            tamano_archivo: doc.size,
+            tipo_archivo: doc.mimetype,
+            icono,
+            color
+          });
+
+          documentosSubidos.push({
+            id: documentoId,
+            location: doc.location
+          });
+
+          console.log(`✅ Documento ${documentoId} vinculado a publicación ${nuevaPublicacionId}`);
+        } catch (docError) {
+          console.error('❌ Error al guardar documento:', docError);
+          // Continuar con los demás documentos
+        }
+      }
+    }
+
+    // Obtener publicación completa con documentos
     const publicacion = await Publicacion.obtenerPorId(nuevaPublicacionId);
 
-    console.log(`📝 Usuario ${req.usuario.id} creó publicación ${nuevaPublicacionId}`);
-    console.log(`📤 Imagen S3: ${req.file ? req.file.location : 'sin imagen'}`);
+    return successResponse(
+      res, 
+      {
+        ...publicacion,
+        advertencia: requiereRevision ? 'Tu publicación está siendo revisada por un moderador' : null,
+        documentos_adjuntos: documentosSubidos.length
+      }, 
+      'Publicación creada exitosamente', 
+      201
+    );
 
-    return successResponse(res, publicacion, 'Publicación creada exitosamente', 201);
   } catch (error) {
     console.error('❌ Error al crear publicación:', error);
+
+    // Limpiar archivos subidos en caso de error
+    if (req.files?.imagen?.[0] && imagenSubida) {
+      await deleteFromS3(req.files.imagen[0].location).catch(() => {});
+    }
+    
+    if (req.files?.documentos) {
+      for (const doc of req.files.documentos) {
+        await deleteFromS3(doc.location).catch(() => {});
+      }
+    }
+    
     return errorResponse(res, 'Error al crear publicación', 500);
   }
 };
 
 /**
- * ========================================
  * OBTENER PUBLICACIONES (FEED)
- * ========================================
  * GET /api/publicaciones
  */
 exports.obtenerPublicaciones = async (req, res) => {
   try {
-    console.log('📍 Obteniendo publicaciones...');
-    console.log('👤 Usuario autenticado:', req.usuario ? req.usuario.id : 'No autenticado');
-    
     let publicaciones;
 
-    // Si no hay usuario autenticado, mostrar publicaciones aleatorias
     if (!req.usuario || !req.usuario.id) {
-      console.log('🎲 Mostrando publicaciones aleatorias (usuario no autenticado)');
       publicaciones = await Publicacion.obtenerAleatorias(20);
       return successResponse(res, publicaciones, 'Publicaciones aleatorias');
     }
 
-    // Intentar obtener publicaciones del feed (seguidos + propias)
     try {
-      console.log('📱 Obteniendo feed personalizado para usuario:', req.usuario.id);
       publicaciones = await Publicacion.obtenerTodasParaUsuario(req.usuario.id);
       
-      console.log('✅ Publicaciones del feed:', publicaciones.length);
-      
-      // Si el usuario no sigue a nadie, complementar con aleatorias
       if (!publicaciones || publicaciones.length === 0) {
-        console.log('🎲 Usuario no sigue a nadie, mostrando aleatorias');
         publicaciones = await Publicacion.obtenerAleatorias(20);
         return successResponse(res, publicaciones, 'Publicaciones aleatorias (no sigues a nadie)');
       }
       
-      // Si tiene pocas publicaciones, complementar con aleatorias
       if (publicaciones.length < 5) {
-        console.log('📊 Pocas publicaciones, complementando con aleatorias');
         const aleatorias = await Publicacion.obtenerAleatorias(10);
-        
-        // Filtrar duplicados
         const idsExistentes = new Set(publicaciones.map(p => p.id));
         const nuevas = aleatorias.filter(p => !idsExistentes.has(p.id));
-        
         publicaciones = [...publicaciones, ...nuevas];
       }
 
       return successResponse(res, publicaciones, 'Feed personalizado');
       
     } catch (feedError) {
-      console.warn('⚠️ Error al obtener feed personalizado:', feedError.message);
-      console.log('🔄 Obteniendo todas las publicaciones como fallback');
-      
       publicaciones = await Publicacion.obtenerTodas();
       
       if (!publicaciones || publicaciones.length === 0) {
@@ -129,23 +276,17 @@ exports.obtenerPublicaciones = async (req, res) => {
     }
     
   } catch (error) {
-    console.error('❌ Error crítico al obtener publicaciones:', error);
-    console.error('Stack:', error.stack);
-    
     try {
       const publicacionesBackup = await Publicacion.obtenerTodas();
       return successResponse(res, publicacionesBackup || [], 'Publicaciones (modo backup)');
     } catch (backupError) {
-      console.error('❌ Error en backup:', backupError);
-      return errorResponse(res, 'Error al obtener publicaciones', 500, [error.message]);
+      return errorResponse(res, 'Error al obtener publicaciones', 500);
     }
   }
 };
 
 /**
- * ========================================
  * OBTENER UNA PUBLICACIÓN POR ID
- * ========================================
  * GET /api/publicaciones/:id
  */
 exports.obtenerPublicacion = async (req, res) => {
@@ -159,15 +300,12 @@ exports.obtenerPublicacion = async (req, res) => {
 
     return successResponse(res, publicacion, 'Publicación encontrada');
   } catch (error) {
-    console.error('❌ Error al obtener publicación:', error);
     return errorResponse(res, 'Error al obtener publicación', 500);
   }
 };
 
 /**
- * ========================================
  * OBTENER MIS PUBLICACIONES
- * ========================================
  * GET /api/publicaciones/mis-publicaciones
  */
 exports.obtenerMisPublicaciones = async (req, res) => {
@@ -180,15 +318,12 @@ exports.obtenerMisPublicaciones = async (req, res) => {
       publicaciones.length > 0 ? 'Mis publicaciones' : 'No tienes publicaciones aún'
     );
   } catch (error) {
-    console.error('❌ Error al obtener mis publicaciones:', error);
     return errorResponse(res, 'Error al obtener mis publicaciones', 500);
   }
 };
 
 /**
- * ========================================
  * OBTENER PUBLICACIONES DE OTRO USUARIO
- * ========================================
  * GET /api/publicaciones/usuario/:usuarioId
  */
 exports.obtenerPublicacionesUsuario = async (req, res) => {
@@ -197,65 +332,105 @@ exports.obtenerPublicacionesUsuario = async (req, res) => {
     const publicaciones = await Publicacion.obtenerPorUsuario(usuarioId);
     return successResponse(res, publicaciones, 'Publicaciones del usuario');
   } catch (error) {
-    console.error('❌ Error al obtener publicaciones del usuario:', error);
     return errorResponse(res, 'Error al obtener publicaciones del usuario', 500);
   }
 };
 
 /**
- * ========================================
- * ACTUALIZAR PUBLICACIÓN
- * ========================================
+ * ACTUALIZAR PUBLICACIÓN - CON VALIDACIÓN PREVIA A S3
  * PUT /api/publicaciones/:id
  */
-exports.crearPublicacion = async (req, res) => {
-  try {
-    const { contenido, categoria } = req.body;
-
-    if (!contenido) {
-      return errorResponse(res, 'El contenido es obligatorio', 400);
-    }
-
-    const categoriasValidas = Publicacion.getCategorias().map(c => c.value);
-    if (categoria && !categoriasValidas.includes(categoria)) {
-      return errorResponse(res, `Categoría inválida. Debe ser una de: ${categoriasValidas.join(', ')}`, 400);
-    }
-
-    const nuevaPublicacionId = await Publicacion.crear({
-      usuario_id: req.usuario.id,
-      contenido,
-      imagen_url: null,
-      imagen_s3: req.file ? req.file.location : null,
-      categoria: categoria || 'General'
-    });
-
-    const publicacion = await Publicacion.obtenerPorId(nuevaPublicacionId);
-
-    console.log(`📝 Usuario ${req.usuario.id} creó publicación ${nuevaPublicacionId}`);
-    console.log(`📤 Imagen S3: ${req.file ? req.file.location : 'sin imagen'}`);
-
-    return successResponse(res, publicacion, 'Publicación creada exitosamente', 201);
-  } catch (error) {
-    console.error('❌ Error al crear publicación:', error);
-    return errorResponse(res, 'Error al crear publicación', 500);
-  }
-};
-
 exports.actualizarPublicacion = async (req, res) => {
+  let imagenSubida = false;
+
   try {
     const { id } = req.params;
     const { contenido, categoria } = req.body;
 
-    // Validar categoría si se proporciona
+    const publicacionActual = await Publicacion.obtenerPorId(id);
+    if (!publicacionActual) {
+      if (req.file) {
+        await deleteFromS3(req.file.location).catch(() => {});
+      }
+      return errorResponse(res, 'Publicación no encontrada', 404);
+    }
+
+    if (publicacionActual.usuario_id !== req.usuario.id) {
+      if (req.file) {
+        await deleteFromS3(req.file.location).catch(() => {});
+      }
+      return errorResponse(res, 'No tienes permiso para actualizar esta publicación', 403);
+    }
+
+    if (contenido && contenido.length > 5000) {
+      if (req.file) {
+        await deleteFromS3(req.file.location).catch(() => {});
+      }
+      return errorResponse(res, 'La publicación no puede exceder 5000 caracteres', 400);
+    }
+
     if (categoria) {
       const categoriasValidas = Publicacion.getCategorias().map(c => c.value);
       if (!categoriasValidas.includes(categoria)) {
-        return errorResponse(res, `Categoría inválida. Debe ser una de: ${categoriasValidas.join(', ')}`, 400);
+        if (req.file) {
+          await deleteFromS3(req.file.location).catch(() => {});
+        }
+        return errorResponse(res, `Categoría inválida`, 400);
       }
     }
 
-    const datosActualizar = { contenido, categoria };
+    if (contenido) {
+      const analisisContenido = await CensuraPublicaciones.validarContenido(
+        contenido,
+        categoria || 'General'
+      );
+
+      if (!analisisContenido.valido) {
+        if (req.file) {
+          await deleteFromS3(req.file.location).catch(() => {});
+        }
+        return errorResponse(
+          res,
+          `Tu contenido actualizado es inapropiado: ${analisisContenido.razon}`,
+          403,
+          { 
+            problemas: analisisContenido.problemas,
+            confianza: analisisContenido.confianza
+          }
+        );
+      }
+    }
+
     if (req.file) {
+      imagenSubida = true;
+      
+      const analisisImagen = await CensuraPublicaciones.validarImagenDescripcion(
+        req.file.location,
+        contenido || publicacionActual.contenido
+      );
+
+      if (!analisisImagen.apropiada || analisisImagen.accion === 'rechazar') {
+        await deleteFromS3(req.file.location).catch(() => {});
+        
+        return errorResponse(
+          res,
+          `Tu imagen actualizada es inapropiada: ${analisisImagen.razon}`,
+          403,
+          { 
+            problemas: analisisImagen.problemas,
+            confianza: analisisImagen.confianza
+          }
+        );
+      }
+    }
+
+    const datosActualizar = {};
+    if (contenido) datosActualizar.contenido = contenido;
+    if (categoria) datosActualizar.categoria = categoria;
+    if (req.file) {
+      if (publicacionActual.imagen_s3) {
+        await deleteFromS3(publicacionActual.imagen_s3).catch(() => {});
+      }
       datosActualizar.imagen_s3 = req.file.location;
       datosActualizar.imagen_url = null;
     }
@@ -263,34 +438,33 @@ exports.actualizarPublicacion = async (req, res) => {
     const actualizado = await Publicacion.actualizar(id, req.usuario.id, datosActualizar);
 
     if (!actualizado) {
+      if (req.file && imagenSubida) {
+        await deleteFromS3(req.file.location).catch(() => {});
+      }
       return errorResponse(res, 'No se pudo actualizar la publicación', 400);
     }
 
     const publicacionActualizada = await Publicacion.obtenerPorId(id);
 
-    console.log(`✏️ Usuario ${req.usuario.id} actualizó publicación ${id}`);
-    console.log(`📤 Imagen S3: ${req.file ? req.file.location : 'sin cambios'}`);
-
     return successResponse(res, publicacionActualizada, 'Publicación actualizada correctamente');
+
   } catch (error) {
-    console.error('❌ Error al actualizar publicación:', error);
+    if (req.file && imagenSubida) {
+      await deleteFromS3(req.file.location).catch(() => {});
+    }
+    
     return errorResponse(res, 'Error al actualizar publicación', 500);
   }
 };
 
 /**
- * ========================================
- * ELIMINAR PUBLICACIÓN
- * ========================================
+ * 🆕 ELIMINAR PUBLICACIÓN (con documentos)
  * DELETE /api/publicaciones/:id
- * 
- * ✅ Elimina la publicación Y todas sus notificaciones asociadas
  */
 exports.eliminarPublicacion = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Verificar que la publicación existe y pertenece al usuario
     const publicacion = await Publicacion.obtenerPorId(id);
     
     if (!publicacion) {
@@ -301,31 +475,44 @@ exports.eliminarPublicacion = async (req, res) => {
       return errorResponse(res, 'No tienes permiso para eliminar esta publicación', 403);
     }
 
-    // ✅ ELIMINAR TODAS LAS NOTIFICACIONES ASOCIADAS
-    // (likes y comentarios de esta publicación)
-    const notificacionesEliminadas = await Notificacion.eliminarNotificacionesPublicacion(id);
-    console.log(`🔔 Eliminadas ${notificacionesEliminadas} notificaciones de publicación ${id}`);
+    // Eliminar imagen de S3
+    if (publicacion.imagen_s3) {
+      await deleteFromS3(publicacion.imagen_s3).catch(() => {});
+    }
 
-    // Eliminar la publicación
-    // (CASCADE eliminará automáticamente likes y comentarios si está configurado)
+    // 🆕 Obtener y eliminar documentos asociados
+    let documentosEliminados = 0;
+    if (publicacion.documentos && publicacion.documentos.length > 0) {
+      for (const doc of publicacion.documentos) {
+        if (doc.documento_s3) {
+          await deleteFromS3(doc.documento_s3).catch(() => {});
+        }
+      }
+      documentosEliminados = publicacion.documentos.length;
+    }
+
+    // Eliminar notificaciones
+    const notificacionesEliminadas = await Notificacion.eliminarNotificacionesPublicacion(id);
+
+    // Eliminar publicación (CASCADE elimina documentos de la BD)
     const eliminado = await Publicacion.eliminar(id, req.usuario.id);
 
     if (!eliminado) {
       return errorResponse(res, 'No se pudo eliminar la publicación', 400);
     }
 
-    console.log(`🗑️ Usuario ${req.usuario.id} eliminó publicación ${id}`);
-
     return successResponse(
       res, 
       { 
         deleted: true,
-        notificacionesEliminadas 
+        notificacionesEliminadas,
+        imagenEliminada: !!publicacion.imagen_s3,
+        documentosEliminados
       }, 
       'Publicación eliminada correctamente'
     );
+
   } catch (error) {
-    console.error('❌ Error al eliminar publicación:', error);
     return errorResponse(res, 'Error al eliminar publicación', 500);
   }
 };

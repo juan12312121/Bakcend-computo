@@ -41,14 +41,36 @@ const documentFilter = (req, file, cb) => {
     'application/vnd.ms-excel',
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     'application/vnd.ms-powerpoint',
-    'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    'application/zip',
+    'application/x-rar-compressed',
+    'text/csv',
+    'text/plain'
   ];
 
   if (tiposPermitidos.includes(file.mimetype)) {
     cb(null, true);
   } else {
-    cb(new Error('Tipo de archivo no permitido. Solo: PDF, Word, Excel, PowerPoint'));
+    cb(new Error('Tipo de archivo no permitido. Solo: PDF, Word, Excel, PowerPoint, ZIP, RAR, CSV, TXT'));
   }
+};
+
+// ============================================
+// 🆕 FILTRO COMBINADO (Imágenes + Documentos)
+// ============================================
+const combinedFilter = (req, file, cb) => {
+  // Si es el campo 'imagen', validar como imagen
+  if (file.fieldname === 'imagen' || file.fieldname === 'foto_perfil' || file.fieldname === 'foto_portada') {
+    return imageFilter(req, file, cb);
+  }
+  
+  // Si es el campo 'documentos', validar como documento
+  if (file.fieldname === 'documentos') {
+    return documentFilter(req, file, cb);
+  }
+
+  // Campo no reconocido
+  cb(new Error(`Campo no permitido: ${file.fieldname}`));
 };
 
 // ============================================
@@ -105,6 +127,46 @@ const uploadDocumentos = multer({
 });
 
 // ============================================
+// 🆕 MULTER PARA PUBLICACIONES (Imagen + Documentos)
+// ============================================
+const uploadPublicacion = multer({
+  storage: multerS3({
+    s3,
+    bucket: process.env.AWS_BUCKET_NAME,
+    contentType: multerS3.AUTO_CONTENT_TYPE,
+    metadata: (req, file, cb) => cb(null, { fieldName: file.fieldname }),
+    key: (req, file, cb) => {
+      const usuario_id = req.usuario?.id ?? 'anon';
+      const ts = Date.now();
+      const random = Math.floor(Math.random() * 10000);
+      const ext = path.extname(file.originalname).toLowerCase();
+      
+      let carpeta, fileKey;
+      
+      // Determinar carpeta según el tipo de archivo
+      if (file.fieldname === 'imagen') {
+        carpeta = 'publicaciones';
+        fileKey = `${carpeta}/img-${usuario_id}-${ts}${ext}`;
+      } else if (file.fieldname === 'documentos') {
+        carpeta = 'documentos';
+        fileKey = `${carpeta}/doc-${usuario_id}-${ts}-${random}${ext}`;
+      } else {
+        carpeta = 'otros';
+        fileKey = `${carpeta}/file-${usuario_id}-${ts}${ext}`;
+      }
+      
+      console.log(`📤 Subiendo archivo a S3: ${fileKey}`);
+      cb(null, fileKey);
+    }
+  }),
+  fileFilter: combinedFilter,
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB límite general
+    files: 6 // Máximo: 1 imagen + 5 documentos
+  }
+});
+
+// ============================================
 // ELIMINAR DE S3
 // ============================================
 const deleteFromS3 = async (keyOrUrl) => {
@@ -152,8 +214,9 @@ const getSignedUrl = (key, expires = 3600) => {
 
 module.exports = {
   s3,
-  upload,              // Para imágenes
-  uploadDocumentos,    // Para documentos
+  upload,              // Para imágenes (perfil, portada, etc)
+  uploadDocumentos,    // Para documentos individuales
+  uploadPublicacion,   // 🆕 Para publicaciones (imagen + documentos)
   deleteFromS3,
   getSignedUrl
 };

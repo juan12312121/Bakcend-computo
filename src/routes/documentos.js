@@ -22,6 +22,9 @@ const handleUploadError = (err, req, res, next) => {
 // Obtener mis documentos - DEBE IR ANTES DE /:id
 router.get('/mis-documentos', proteger, documentosController.obtenerMisDocumentos);
 
+// 🆕 Obtener documentos de una publicación específica
+router.get('/publicacion/:publicacion_id', proteger, documentosController.obtenerDocumentosPorPublicacion);
+
 // Subir documento
 router.post(
   '/', 
@@ -30,6 +33,12 @@ router.post(
   handleUploadError,
   documentosController.subirDocumento
 );
+
+// 🆕 Vincular documento existente a publicación
+router.patch('/:id/vincular', proteger, documentosController.vincularDocumentoAPublicacion);
+
+// 🆕 Desvincular documento de publicación
+router.patch('/:id/desvincular', proteger, documentosController.desvincularDocumento);
 
 // Actualizar documento
 router.put(

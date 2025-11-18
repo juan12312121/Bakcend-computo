@@ -1,13 +1,18 @@
 const db = require('../config/database');
 const PublicacionOculta = require('./PublicacionOculta');
+const Documento = require('./Documento');
 
 class Publicacion {
     
+  /**
+   * Crear nueva publicación
+   * @param {object} datos - Datos de la publicación
+   */
   static async crear(datos) {
     const query = `
       INSERT INTO publicaciones 
-      (usuario_id, contenido, imagen_url, imagen_s3, categoria, color_categoria)
-      VALUES (?, ?, ?, ?, ?, ?)
+      (usuario_id, contenido, imagen_url, imagen_s3, categoria, color_categoria, requiere_revision, analisis_censura)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     const categoriaColores = {
@@ -24,6 +29,8 @@ class Publicacion {
 
     const categoria = datos.categoria || 'General';
     const color = datos.color_categoria || categoriaColores[categoria] || 'bg-orange-500';
+    const requiereRevision = datos.requiere_revision || 0;
+    const analisisCensura = datos.analisis_censura || null;
 
     const [resultado] = await db.execute(query, [
       datos.usuario_id,
@@ -31,15 +38,19 @@ class Publicacion {
       datos.imagen_url || null,
       datos.imagen_s3 || null,
       categoria,
-      color
+      color,
+      requiereRevision,
+      analisisCensura
     ]);
 
     return resultado.insertId;
   }
 
+  /**
+   * Obtener todas las publicaciones (públicas) - ✅ CON CONTADORES
+   */
   static async obtenerTodas() {
     try {
-      // Primero verificar si la columna suspendido existe
       const checkColumn = `
         SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
         WHERE TABLE_NAME = 'usuarios' AND COLUMN_NAME = 'suspendido'
@@ -47,13 +58,19 @@ class Publicacion {
       const [columnExists] = await db.execute(checkColumn);
       
       let query = `
-        SELECT P.*, U.nombre_completo, U.nombre_usuario, U.foto_perfil_url
+        SELECT 
+          P.*,
+          P.total_likes,
+          P.total_comentarios,
+          P.total_compartidos,
+          U.nombre_completo, 
+          U.nombre_usuario, 
+          U.foto_perfil_url
         FROM publicaciones P
         INNER JOIN usuarios U ON U.id = P.usuario_id
         WHERE P.oculto = 0
       `;
       
-      // Si la columna existe, excluir usuarios suspendidos
       if (columnExists.length > 0) {
         query += ` AND U.suspendido = 0`;
       }
@@ -61,12 +78,24 @@ class Publicacion {
       query += ` ORDER BY P.fecha_creacion DESC LIMIT 100`;
       
       const [filas] = await db.execute(query);
+      
+      // Agregar documentos a cada publicación
+      for (let publicacion of filas) {
+        publicacion.documentos = await Documento.obtenerPorPublicacion(publicacion.id);
+      }
+      
       return filas;
     } catch (error) {
       console.error('Error en obtenerTodas:', error);
-      // Fallback: obtener solo publicaciones no ocultas
       const query = `
-        SELECT P.*, U.nombre_completo, U.nombre_usuario, U.foto_perfil_url
+        SELECT 
+          P.*,
+          P.total_likes,
+          P.total_comentarios,
+          P.total_compartidos,
+          U.nombre_completo, 
+          U.nombre_usuario, 
+          U.foto_perfil_url
         FROM publicaciones P
         INNER JOIN usuarios U ON U.id = P.usuario_id
         WHERE P.oculto = 0
@@ -74,21 +103,55 @@ class Publicacion {
         LIMIT 100
       `;
       const [filas] = await db.execute(query);
+      
+      for (let publicacion of filas) {
+        publicacion.documentos = await Documento.obtenerPorPublicacion(publicacion.id);
+      }
+      
       return filas;
     }
   }
 
+  /**
+   * Obtener publicación por ID - ✅ CON CONTADORES
+   */
   static async obtenerPorId(id) {
     const query = `
-      SELECT P.*, U.nombre_usuario, U.nombre_completo, U.foto_perfil_url, U.suspendido
+      SELECT 
+        P.*, 
+        P.total_likes,
+        P.total_comentarios,
+        P.total_compartidos,
+        U.nombre_usuario, 
+        U.nombre_completo, 
+        U.foto_perfil_url, 
+        U.suspendido
       FROM publicaciones P
       INNER JOIN usuarios U ON U.id = P.usuario_id
       WHERE P.id = ?
     `;
     const [filas] = await db.execute(query, [id]);
-    return filas[0] || null;
+    
+    if (!filas[0]) return null;
+    
+    const publicacion = filas[0];
+    
+    if (publicacion.analisis_censura) {
+      try {
+        publicacion.analisis_censura = JSON.parse(publicacion.analisis_censura);
+      } catch (e) {
+        console.warn('No se pudo parsear análisis_censura:', e.message);
+      }
+    }
+    
+    publicacion.documentos = await Documento.obtenerPorPublicacion(id);
+    
+    return publicacion;
   }
 
+  /**
+   * Actualizar publicación
+   */
   static async actualizar(id, usuarioId, datos) {
     const campos = [];
     const valores = [];
@@ -130,6 +193,14 @@ class Publicacion {
       campos.push('color_categoria = ?');
       valores.push(datos.color_categoria);
     }
+    if (datos.requiere_revision !== undefined) {
+      campos.push('requiere_revision = ?');
+      valores.push(datos.requiere_revision);
+    }
+    if (datos.analisis_censura !== undefined) {
+      campos.push('analisis_censura = ?');
+      valores.push(datos.analisis_censura);
+    }
 
     if (valores.length === 0) return false;
 
@@ -145,6 +216,9 @@ class Publicacion {
     return resultado.affectedRows > 0;
   }
 
+  /**
+   * Eliminar publicación (marca como oculta)
+   */
   static async eliminar(id, usuarioId) {
     const query = `
       UPDATE publicaciones
@@ -155,43 +229,59 @@ class Publicacion {
     return resultado.affectedRows > 0;
   }
 
+  /**
+   * Obtener publicaciones aleatorias - ✅ CON CONTADORES
+   */
   static async obtenerAleatorias(limit = 10) {
-  try {
-    const limitNum = parseInt(limit) || 10;
-    
-    const checkColumn = `
-      SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
-      WHERE TABLE_NAME = 'usuarios' AND COLUMN_NAME = 'suspendido'
-    `;
-    const [columnExists] = await db.execute(checkColumn);
+    try {
+      const limitNum = parseInt(limit) || 10;
+      
+      const checkColumn = `
+        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
+        WHERE TABLE_NAME = 'usuarios' AND COLUMN_NAME = 'suspendido'
+      `;
+      const [columnExists] = await db.execute(checkColumn);
 
-    let query = `
-      SELECT P.*, U.nombre_completo, U.nombre_usuario, U.foto_perfil_url
-      FROM publicaciones P
-      INNER JOIN usuarios U ON U.id = P.usuario_id
-      WHERE P.oculto = 0
-    `;
+      let query = `
+        SELECT 
+          P.*,
+          P.total_likes,
+          P.total_comentarios,
+          P.total_compartidos,
+          U.nombre_completo, 
+          U.nombre_usuario, 
+          U.foto_perfil_url
+        FROM publicaciones P
+        INNER JOIN usuarios U ON U.id = P.usuario_id
+        WHERE P.oculto = 0
+      `;
 
-    if (columnExists.length > 0) {
-      query += ` AND U.suspendido = 0`;
+      if (columnExists.length > 0) {
+        query += ` AND U.suspendido = 0`;
+      }
+
+      query += ` ORDER BY RAND() LIMIT ${limitNum}`;
+
+      const [filas] = await db.execute(query);
+      
+      for (let publicacion of filas) {
+        publicacion.documentos = await Documento.obtenerPorPublicacion(publicacion.id);
+      }
+      
+      return filas;
+    } catch (error) {
+      console.error('Error en obtenerAleatorias:', error);
+      throw error;
     }
-
-    // ✅ interpolar el valor validado en la consulta
-    query += ` ORDER BY RAND() LIMIT ${limitNum}`;
-
-    const [filas] = await db.execute(query);
-    return filas;
-  } catch (error) {
-    console.error('Error en obtenerAleatorias:', error);
-    throw error;
   }
-}
 
+  /**
+   * Obtener feed personalizado para un usuario - ✅ CON CONTADORES
+   */
   static async obtenerTodasParaUsuario(usuarioId) {
     try {
       console.log('📱 Obteniendo feed para usuario:', usuarioId);
       
-      // Obtener IDs de publicaciones ocultas del usuario
       const publicacionesOcultas = await PublicacionOculta.obtenerIdsPorUsuario(usuarioId);
       let ocultasClause = '';
       
@@ -211,7 +301,14 @@ class Publicacion {
       if (tableCheck[0].count === 0) {
         console.warn('⚠️ Tabla seguidores no existe');
         const query = `
-          SELECT P.*, U.nombre_completo, U.nombre_usuario, U.foto_perfil_url
+          SELECT 
+            P.*,
+            P.total_likes,
+            P.total_comentarios,
+            P.total_compartidos,
+            U.nombre_completo, 
+            U.nombre_usuario, 
+            U.foto_perfil_url
           FROM publicaciones P
           INNER JOIN usuarios U ON U.id = P.usuario_id
           WHERE P.oculto = 0 AND U.suspendido = 0 ${ocultasClause}
@@ -219,12 +316,23 @@ class Publicacion {
           LIMIT 100
         `;
         const [filas] = await db.execute(query);
+        
+        for (let publicacion of filas) {
+          publicacion.documentos = await Documento.obtenerPorPublicacion(publicacion.id);
+        }
+        
         return filas;
       }
       
-      // Obtener publicaciones del feed (seguidos + propias) sin las ocultas ni de usuarios suspendidos
       const query = `
-        SELECT DISTINCT P.*, U.nombre_completo, U.nombre_usuario, U.foto_perfil_url
+        SELECT DISTINCT 
+          P.*,
+          P.total_likes,
+          P.total_comentarios,
+          P.total_compartidos,
+          U.nombre_completo, 
+          U.nombre_usuario, 
+          U.foto_perfil_url
         FROM publicaciones P
         INNER JOIN usuarios U ON U.id = P.usuario_id
         WHERE P.oculto = 0
@@ -244,6 +352,10 @@ class Publicacion {
       
       const [filas] = await db.execute(query, [usuarioId, usuarioId]);
       console.log('✅ Publicaciones encontradas:', filas.length);
+      
+      for (let publicacion of filas) {
+        publicacion.documentos = await Documento.obtenerPorPublicacion(publicacion.id);
+      }
       
       return filas;
       
@@ -265,6 +377,9 @@ class Publicacion {
     }
   }
 
+  /**
+   * Obtener publicaciones de un usuario específico - ✅ CON CONTADORES
+   */
   static async obtenerPorUsuario(usuarioId) {
     try {
       const checkColumn = `
@@ -274,7 +389,14 @@ class Publicacion {
       const [columnExists] = await db.execute(checkColumn);
       
       let query = `
-        SELECT P.*, U.nombre_completo, U.nombre_usuario, U.foto_perfil_url
+        SELECT 
+          P.*,
+          P.total_likes,
+          P.total_comentarios,
+          P.total_compartidos,
+          U.nombre_completo, 
+          U.nombre_usuario, 
+          U.foto_perfil_url
         FROM publicaciones P
         INNER JOIN usuarios U ON U.id = P.usuario_id
         WHERE P.oculto = 0 AND P.usuario_id = ?
@@ -287,21 +409,50 @@ class Publicacion {
       query += ` ORDER BY P.fecha_creacion DESC`;
       
       const [filas] = await db.execute(query, [usuarioId]);
+      
+      for (let publicacion of filas) {
+        publicacion.documentos = await Documento.obtenerPorPublicacion(publicacion.id);
+      }
+      
       return filas;
     } catch (error) {
       console.error('Error en obtenerPorUsuario:', error);
       const query = `
-        SELECT P.*, U.nombre_completo, U.nombre_usuario, U.foto_perfil_url
+        SELECT 
+          P.*,
+          P.total_likes,
+          P.total_comentarios,
+          P.total_compartidos,
+          U.nombre_completo, 
+          U.nombre_usuario, 
+          U.foto_perfil_url
         FROM publicaciones P
         INNER JOIN usuarios U ON U.id = P.usuario_id
         WHERE P.oculto = 0 AND P.usuario_id = ?
         ORDER BY P.fecha_creacion DESC
       `;
       const [filas] = await db.execute(query, [usuarioId]);
+      
+      for (let publicacion of filas) {
+        publicacion.documentos = await Documento.obtenerPorPublicacion(publicacion.id);
+      }
+      
       return filas;
     }
   }
 
+  static async existeYPerteneceAUsuario(publicacionId, usuarioId) {
+  const query = `
+    SELECT id FROM publicaciones 
+    WHERE id = ? AND usuario_id = ? AND oculto = 0
+  `;
+  const [filas] = await db.execute(query, [publicacionId, usuarioId]);
+  return filas.length > 0;
+}
+
+  /**
+   * Obtener todas las categorías disponibles
+   */
   static getCategorias() {
     return [
       { value: 'General', label: 'General', color: 'bg-orange-500' },

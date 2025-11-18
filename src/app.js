@@ -11,6 +11,11 @@ const routes = require('./routes');
 const errorHandler = require('./middlewares/errorHandler');
 const db = require('./config/database');
 const { s3 } = require('./config/aws');
+const { genAI } = require('./config/gemini');
+
+// 🆕 Importar SSE y modelo de Notificaciones
+const { enviarEventoSSE } = require('./routes/notificacionesRoutes');
+const Notificacion = require('./models/Notificacion');
 
 const app = express();
 
@@ -40,11 +45,13 @@ app.use(cors({
     'http://localhost:4200',
     'http://13.59.190.199:4200',
     'http://3.146.83.30:4200',
-    /^http:\/\/3\.144\.201\.57(:\d+)?$/
+    /^http:\/\/3\.144\.201\.57(:\d+)?$/,
+    'http://angular-webapp-frontend.s3-website.us-east-2.amazonaws.com'
   ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'Cache-Control', 'X-Requested-With'], // 🆕 Para SSE
+  exposedHeaders: ['Content-Type', 'Cache-Control'] // 🆕 Para SSE
 }));
 
 app.use(compression());
@@ -52,6 +59,21 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 app.use(morgan('dev'));
+
+// 🆕 CONFIGURAR SSE EN EL MODELO ANTES DE REGISTRAR RUTAS
+console.log('========================================');
+console.log('🔌 Configurando SSE en el modelo de Notificaciones...');
+console.log('========================================');
+
+try {
+  Notificacion.configurarSSE(enviarEventoSSE);
+  console.log('✅ SSE configurado correctamente en el modelo de Notificaciones');
+  console.log('📡 Función enviarEventoSSE:', typeof enviarEventoSSE);
+} catch (error) {
+  console.error('❌ Error al configurar SSE:', error);
+}
+
+console.log('========================================');
 
 // 🔥 Endpoint para verificar S3
 app.get('/api/s3/health', async (req, res) => {
@@ -75,6 +97,52 @@ app.get('/api/s3/health', async (req, res) => {
       mensaje: '❌ Error al conectar con S3',
       error: error.message,
       bucket: process.env.AWS_BUCKET_NAME
+    });
+  }
+});
+
+// 🤖 Endpoint para verificar GEMINI
+app.get('/api/gemini/health', async (req, res) => {
+  try {
+    console.log('🤖 Verificando conexión con Gemini...');
+    
+    // Obtener modelo
+    const modelo = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    
+    // Hacer una solicitud de prueba simple
+    const resultado = await modelo.generateContent({
+      contents: [{ 
+        role: 'user', 
+        parts: [{ text: 'Responde solo con "OK"' }] 
+      }],
+      generationConfig: {
+        temperature: 0.1,
+        maxOutputTokens: 10
+      }
+    });
+    
+    const respuesta = resultado.response.text();
+    
+    res.json({
+      success: true,
+      mensaje: '✅ Conexión con Gemini exitosa',
+      modelo: 'gemini-1.5-flash',
+      respuesta: respuesta.trim(),
+      timestamp: new Date().toISOString(),
+      apiKey: process.env.GEMINI_API_KEY ? '✅ Configurada' : '❌ No configurada'
+    });
+    
+  } catch (error) {
+    console.error('❌ Error en Gemini health check:', error.message);
+    res.status(500).json({
+      success: false,
+      mensaje: '❌ Error al conectar con Gemini',
+      error: error.message,
+      detalles: {
+        modelo: 'gemini-1.5-flash',
+        apiKey: process.env.GEMINI_API_KEY ? '✅ Configurada' : '❌ No configurada',
+        timestamp: new Date().toISOString()
+      }
     });
   }
 });
@@ -159,19 +227,56 @@ app.get('/debug/uploads', (req, res) => {
   }
 });
 
+// 🔥 Health check general
+app.get('/health', async (req, res) => {
+  try {
+    // Verificar BD
+    const dbCheck = await db.execute('SELECT 1');
+    
+    res.json({
+      success: true,
+      mensaje: 'API RedStudent - Todo funcionando ✅',
+      timestamp: new Date().toISOString(),
+      servicios: {
+        base_de_datos: '✅ Conectado',
+        s3: '✅ Configurado',
+        gemini: '✅ Configurado',
+        sse: '✅ Configurado', // 🆕
+        cors: '✅ Habilitado'
+      },
+      endpoints_debug: {
+        s3_health: '/api/s3/health',
+        gemini_health: '/api/gemini/health',
+        uploads: '/debug/uploads'
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      mensaje: '❌ Error en health check',
+      error: error.message
+    });
+  }
+});
+
 // Ruta raíz
 app.get('/', (req, res) => {
   res.json({
     mensaje: 'API RedStudent funcionando correctamente',
-    version: '2.0.0 - AWS S3',
+    version: '2.0.0 - AWS S3 + Gemini + SSE',
     almacenamiento: 'AWS S3',
+    censura: 'Google Gemini',
+    notificaciones: 'Server-Sent Events (SSE)', // 🆕
     endpoints: {
       health: '/health',
       s3Health: '/api/s3/health',
+      geminiHealth: '/api/gemini/health',
       s3Files: '/api/s3/files',
       auth: '/api/auth',
       usuarios: '/api/usuarios',
-      publicaciones: '/api/publicaciones'
+      publicaciones: '/api/publicaciones',
+      notificaciones: '/api/notificaciones',
+      notificacionesSSE: '/api/notificaciones/stream/:usuarioId' // 🆕
     }
   });
 });

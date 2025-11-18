@@ -1,16 +1,101 @@
 const pool = require('../config/database');
 
+// 🆕 Importar la función de SSE (se configurará después)
+let enviarEventoSSE = null;
+
+/**
+ * Configurar la función SSE (llamar desde el archivo principal)
+ */
+function configurarSSE(funcionSSE) {
+  enviarEventoSSE = funcionSSE;
+  console.log('✅ SSE configurado en el modelo de Notificaciones');
+}
+
+/**
+ * ============================================
+ * HELPERS INTERNOS PARA SSE
+ * ============================================
+ */
+
+/**
+ * Enviar notificación en tiempo real por SSE
+ */
+async function enviarNotificacionTiempoReal(notificacionId, usuarioId) {
+  if (!enviarEventoSSE) {
+    console.log('⚠️ SSE no está configurado');
+    return;
+  }
+
+  try {
+    // Obtener datos completos de la notificación
+    const [notificaciones] = await pool.query(
+      `SELECT 
+        n.id,
+        n.usuario_id,
+        n.de_usuario_id,
+        n.tipo,
+        n.publicacion_id,
+        n.mensaje,
+        n.leida,
+        n.fecha_creacion,
+        u.nombre_usuario,
+        u.nombre_completo,
+        u.foto_perfil_url,
+        u.foto_perfil_s3
+      FROM notificaciones n
+      JOIN usuarios u ON n.de_usuario_id = u.id
+      WHERE n.id = ?`,
+      [notificacionId]
+    );
+
+    if (notificaciones.length === 0) {
+      console.log('❌ Notificación no encontrada:', notificacionId);
+      return;
+    }
+
+    const notificacion = notificaciones[0];
+
+    // 🔔 Enviar nueva notificación por SSE
+    enviarEventoSSE(usuarioId, 'nueva_notificacion', notificacion);
+    
+    // 🔢 Actualizar contador
+    await actualizarContadorTiempoReal(usuarioId);
+
+    console.log(`✅ Notificación ${notificacionId} enviada por SSE a usuario ${usuarioId}`);
+  } catch (error) {
+    console.error('❌ Error al enviar notificación en tiempo real:', error);
+  }
+}
+
+/**
+ * Actualizar contador en tiempo real por SSE
+ */
+async function actualizarContadorTiempoReal(usuarioId) {
+  if (!enviarEventoSSE) {
+    return;
+  }
+
+  try {
+    const [result] = await pool.query(
+      'SELECT COUNT(*) as total FROM notificaciones WHERE usuario_id = ? AND leida = 0',
+      [usuarioId]
+    );
+    
+    const total = result[0].total;
+    
+    // 🔢 Enviar contador actualizado por SSE
+    enviarEventoSSE(usuarioId, 'actualizar_contador', { total });
+    
+    return total;
+  } catch (error) {
+    console.error('❌ Error al actualizar contador en tiempo real:', error);
+    return 0;
+  }
+}
+
 /**
  * ============================================
  * MODELO DE NOTIFICACIONES
- * ============================================
- * Maneja todas las operaciones de base de datos
- * para el sistema de notificaciones
- * 
- * Tipos de notificaciones:
- * - like: Alguien dio like a tu publicación
- * - comment: Alguien comentó tu publicación
- * - follow: Alguien te siguió
  * ============================================
  */
 
@@ -28,7 +113,13 @@ class Notificacion {
         VALUES (?, ?, ?, ?, ?)`,
         [usuario_id, de_usuario_id, tipo, publicacion_id, mensaje]
       );
-      return result.insertId;
+      
+      const notificacionId = result.insertId;
+      
+      // 🆕 Enviar por SSE en tiempo real
+      await enviarNotificacionTiempoReal(notificacionId, usuario_id);
+      
+      return notificacionId;
     } catch (error) {
       console.error('❌ Error en Notificacion.crear:', error);
       throw error;
@@ -39,7 +130,6 @@ class Notificacion {
    * ========================================
    * CREAR NOTIFICACIÓN DE LIKE
    * ========================================
-   * Se llama cuando alguien da like a una publicación
    */
   static async crearNotificacionLike(publicacion_id, usuario_que_da_like) {
     try {
@@ -67,7 +157,7 @@ class Notificacion {
         [dueno_publicacion, usuario_que_da_like, publicacion_id]
       );
 
-      if (existe.length > 0) return null; // Ya existe notificación reciente
+      if (existe.length > 0) return null;
 
       // 4. Obtener nombre del usuario que da like
       const [usuario] = await pool.query(
@@ -75,9 +165,9 @@ class Notificacion {
         [usuario_que_da_like]
       );
 
-      const mensaje = `@${usuario[0].nombre_usuario} le dio like a tu publicación`;
+      const mensaje = `le gustó tu publicación`;
 
-      // 5. Crear la notificación
+      // 5. Crear la notificación (se enviará automáticamente por SSE)
       return await this.crear(
         dueno_publicacion,
         usuario_que_da_like,
@@ -95,11 +185,9 @@ class Notificacion {
    * ========================================
    * CREAR NOTIFICACIÓN DE COMENTARIO
    * ========================================
-   * Se llama cuando alguien comenta una publicación
    */
   static async crearNotificacionComentario(publicacion_id, usuario_que_comenta) {
     try {
-      // 1. Obtener el dueño de la publicación
       const [publicacion] = await pool.query(
         'SELECT usuario_id FROM publicaciones WHERE id = ?',
         [publicacion_id]
@@ -109,18 +197,16 @@ class Notificacion {
 
       const dueno_publicacion = publicacion[0].usuario_id;
 
-      // 2. No crear notificación si el usuario comenta su propia publicación
       if (dueno_publicacion === usuario_que_comenta) return null;
 
-      // 3. Obtener nombre del usuario que comenta
       const [usuario] = await pool.query(
         'SELECT nombre_usuario FROM usuarios WHERE id = ?',
         [usuario_que_comenta]
       );
 
-      const mensaje = `@${usuario[0].nombre_usuario} comentó tu publicación`;
+      const mensaje = `comentó tu publicación`;
 
-      // 4. Crear la notificación (siempre crear, aunque haya múltiples comentarios)
+      // Crear la notificación (se enviará automáticamente por SSE)
       return await this.crear(
         dueno_publicacion,
         usuario_que_comenta,
@@ -138,11 +224,9 @@ class Notificacion {
    * ========================================
    * CREAR NOTIFICACIÓN DE SEGUIMIENTO
    * ========================================
-   * Se llama cuando alguien sigue a otro usuario
    */
   static async crearNotificacionSeguimiento(usuario_seguido, usuario_que_sigue) {
     try {
-      // 1. Verificar si ya existe una notificación similar reciente (últimas 24 horas)
       const [existe] = await pool.query(
         `SELECT id FROM notificaciones 
         WHERE usuario_id = ? 
@@ -152,17 +236,16 @@ class Notificacion {
         [usuario_seguido, usuario_que_sigue]
       );
 
-      if (existe.length > 0) return null; // Ya existe notificación reciente
+      if (existe.length > 0) return null;
 
-      // 2. Obtener nombre del usuario que sigue
       const [usuario] = await pool.query(
         'SELECT nombre_usuario FROM usuarios WHERE id = ?',
         [usuario_que_sigue]
       );
 
-      const mensaje = `@${usuario[0].nombre_usuario} comenzó a seguirte`;
+      const mensaje = `comenzó a seguirte`;
 
-      // 3. Crear la notificación
+      // Crear la notificación (se enviará automáticamente por SSE)
       return await this.crear(
         usuario_seguido,
         usuario_que_sigue,
@@ -180,7 +263,6 @@ class Notificacion {
    * ========================================
    * OBTENER NOTIFICACIONES POR USUARIO
    * ========================================
-   * Obtiene todas las notificaciones de un usuario (paginadas)
    */
   static async obtenerPorUsuario(usuario_id, limit = 20, offset = 0) {
     try {
@@ -275,6 +357,12 @@ class Notificacion {
         'UPDATE notificaciones SET leida = 1 WHERE id = ? AND usuario_id = ?',
         [notificacion_id, usuario_id]
       );
+      
+      // 🆕 Actualizar contador en tiempo real
+      if (result.affectedRows > 0) {
+        await actualizarContadorTiempoReal(usuario_id);
+      }
+      
       return result.affectedRows > 0;
     } catch (error) {
       console.error('❌ Error en marcarComoLeida:', error);
@@ -293,6 +381,12 @@ class Notificacion {
         'UPDATE notificaciones SET leida = 1 WHERE usuario_id = ? AND leida = 0',
         [usuario_id]
       );
+      
+      // 🆕 Actualizar contador en tiempo real (será 0)
+      if (result.affectedRows > 0) {
+        await actualizarContadorTiempoReal(usuario_id);
+      }
+      
       return result.affectedRows;
     } catch (error) {
       console.error('❌ Error en marcarTodasComoLeidas:', error);
@@ -311,6 +405,12 @@ class Notificacion {
         'DELETE FROM notificaciones WHERE id = ? AND usuario_id = ?',
         [notificacion_id, usuario_id]
       );
+      
+      // 🆕 Actualizar contador en tiempo real
+      if (result.affectedRows > 0) {
+        await actualizarContadorTiempoReal(usuario_id);
+      }
+      
       return result.affectedRows > 0;
     } catch (error) {
       console.error('❌ Error en eliminar:', error);
@@ -318,8 +418,12 @@ class Notificacion {
     }
   }
 
-
-   static async eliminarNotificacionesPublicacion(publicacion_id) {
+  /**
+   * ========================================
+   * ELIMINAR NOTIFICACIONES DE PUBLICACIÓN
+   * ========================================
+   */
+  static async eliminarNotificacionesPublicacion(publicacion_id) {
     try {
       const [result] = await pool.query(
         `DELETE FROM notificaciones 
@@ -341,10 +445,18 @@ class Notificacion {
    * ========================================
    * ELIMINAR NOTIFICACIÓN DE LIKE
    * ========================================
-   * Se llama cuando se elimina un like
    */
   static async eliminarNotificacionLike(publicacion_id, usuario_que_dio_like) {
     try {
+      // Obtener el usuario_id afectado antes de eliminar
+      const [notif] = await pool.query(
+        `SELECT usuario_id FROM notificaciones 
+        WHERE tipo = 'like' 
+        AND publicacion_id = ? 
+        AND de_usuario_id = ?`,
+        [publicacion_id, usuario_que_dio_like]
+      );
+
       const [result] = await pool.query(
         `DELETE FROM notificaciones 
         WHERE tipo = 'like' 
@@ -352,6 +464,12 @@ class Notificacion {
         AND de_usuario_id = ?`,
         [publicacion_id, usuario_que_dio_like]
       );
+      
+      // 🆕 Actualizar contador en tiempo real
+      if (result.affectedRows > 0 && notif.length > 0) {
+        await actualizarContadorTiempoReal(notif[0].usuario_id);
+      }
+      
       return result.affectedRows > 0;
     } catch (error) {
       console.error('❌ Error en eliminarNotificacionLike:', error);
@@ -363,7 +481,6 @@ class Notificacion {
    * ========================================
    * ELIMINAR NOTIFICACIÓN DE SEGUIMIENTO
    * ========================================
-   * Se llama cuando se deja de seguir a alguien
    */
   static async eliminarNotificacionSeguimiento(usuario_seguido, usuario_que_seguia) {
     try {
@@ -374,6 +491,12 @@ class Notificacion {
         AND de_usuario_id = ?`,
         [usuario_seguido, usuario_que_seguia]
       );
+      
+      // 🆕 Actualizar contador en tiempo real
+      if (result.affectedRows > 0) {
+        await actualizarContadorTiempoReal(usuario_seguido);
+      }
+      
       return result.affectedRows > 0;
     } catch (error) {
       console.error('❌ Error en eliminarNotificacionSeguimiento:', error);
@@ -385,8 +508,6 @@ class Notificacion {
    * ========================================
    * LIMPIAR NOTIFICACIONES ANTIGUAS
    * ========================================
-   * Elimina notificaciones con más de 30 días
-   * Útil para mantenimiento de base de datos
    */
   static async limpiarAntiguas() {
     try {
@@ -403,3 +524,4 @@ class Notificacion {
 }
 
 module.exports = Notificacion;
+module.exports.configurarSSE = configurarSSE;

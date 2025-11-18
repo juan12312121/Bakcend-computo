@@ -4,12 +4,14 @@ class Documento {
   static async crear(datos) {
     const query = `
       INSERT INTO documentos 
-      (usuario_id, documento_url, documento_s3, nombre_archivo, tamano_archivo, tipo_archivo, icono, color)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      (usuario_id, publicacion_id, documento_url, documento_s3, nombre_archivo, 
+       tamano_archivo, tipo_archivo, icono, color)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     const [resultado] = await db.execute(query, [
       datos.usuario_id,
+      datos.publicacion_id || null,
       datos.documento_url || null,
       datos.documento_s3 || null,
       datos.nombre_archivo,
@@ -43,6 +45,34 @@ class Documento {
     return filas;
   }
 
+  /**
+   * 🆕 Obtener documentos de una publicación específica
+   */
+  static async obtenerPorPublicacion(publicacion_id) {
+    const query = `
+      SELECT d.*, u.nombre_usuario, u.nombre_completo
+      FROM documentos d
+      LEFT JOIN usuarios u ON u.id = d.usuario_id
+      WHERE d.publicacion_id = ?
+      ORDER BY d.fecha_creacion ASC
+    `;
+    const [filas] = await db.execute(query, [publicacion_id]);
+    return filas;
+  }
+
+  /**
+   * 🆕 Contar documentos de una publicación
+   */
+  static async contarPorPublicacion(publicacion_id) {
+    const query = `
+      SELECT COUNT(*) as total
+      FROM documentos
+      WHERE publicacion_id = ?
+    `;
+    const [filas] = await db.execute(query, [publicacion_id]);
+    return filas[0].total;
+  }
+
   static async obtenerTodos() {
     const query = `
       SELECT d.*, u.nombre_usuario, u.nombre_completo
@@ -67,6 +97,10 @@ class Documento {
       campos.push('documento_s3 = ?');
       valores.push(datos.documento_s3);
     }
+    if (datos.publicacion_id !== undefined) {
+      campos.push('publicacion_id = ?');
+      valores.push(datos.publicacion_id);
+    }
     if (datos.icono !== undefined) {
       campos.push('icono = ?');
       valores.push(datos.icono);
@@ -90,6 +124,19 @@ class Documento {
     return resultado.affectedRows > 0;
   }
 
+  /**
+   * 🆕 Desvincular documento de publicación (sin eliminarlo)
+   */
+  static async desvincularDePublicacion(id, usuario_id) {
+    const query = `
+      UPDATE documentos
+      SET publicacion_id = NULL
+      WHERE id = ? AND usuario_id = ?
+    `;
+    const [resultado] = await db.execute(query, [id, usuario_id]);
+    return resultado.affectedRows > 0;
+  }
+
   static async eliminar(id, usuario_id) {
     const query = `
       DELETE FROM documentos
@@ -97,6 +144,18 @@ class Documento {
     `;
     const [resultado] = await db.execute(query, [id, usuario_id]);
     return resultado.affectedRows > 0;
+  }
+
+  /**
+   * 🆕 Eliminar todos los documentos de una publicación
+   */
+  static async eliminarPorPublicacion(publicacion_id, usuario_id) {
+    const query = `
+      DELETE FROM documentos
+      WHERE publicacion_id = ? AND usuario_id = ?
+    `;
+    const [resultado] = await db.execute(query, [publicacion_id, usuario_id]);
+    return resultado.affectedRows;
   }
 
   static obtenerIconoYColor(tipo_archivo) {
