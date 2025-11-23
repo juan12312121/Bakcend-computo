@@ -2,14 +2,15 @@ const db = require('../config/database');
 
 class PublicacionNoInteresa {
   /**
-   * Marcar una publicación como "No me interesa"
+   * Marcar una publicación como "No me interesa" (la oculta para el usuario)
    * @param {number} usuarioId - ID del usuario
    * @param {number} publicacionId - ID de la publicación
-   * @param {string} categoria - Categoría de la publicación (opcional)
    * @returns {Promise<number>} ID del registro creado
    */
-  static async marcar(usuarioId, publicacionId, categoria = null) {
+  static async marcar(usuarioId, publicacionId) {
     try {
+      console.log('👎 Marcando publicación como "No me interesa":', { usuarioId, publicacionId });
+      
       // Verificar si ya existe
       const checkQuery = `
         SELECT id FROM publicaciones_no_interesa 
@@ -18,45 +19,45 @@ class PublicacionNoInteresa {
       const [existe] = await db.execute(checkQuery, [usuarioId, publicacionId]);
       
       if (existe.length > 0) {
+        console.log('ℹ️ Ya existe el registro:', existe[0].id);
         return existe[0].id;
       }
 
-      // Si no se proporciona categoría, obtenerla de la publicación
-      if (!categoria) {
-        const categoriaQuery = `
-          SELECT categoria FROM publicaciones WHERE id = ?
-        `;
-        const [pub] = await db.execute(categoriaQuery, [publicacionId]);
-        categoria = pub[0]?.categoria || null;
-      }
-
-      // Insertar el registro
+      // Insertar el registro (oculta la publicación para este usuario)
       const query = `
-        INSERT INTO publicaciones_no_interesa (usuario_id, publicacion_id, categoria)
-        VALUES (?, ?, ?)
+        INSERT INTO publicaciones_no_interesa (usuario_id, publicacion_id, fecha_creacion)
+        VALUES (?, ?, NOW())
       `;
-      const [result] = await db.execute(query, [usuarioId, publicacionId, categoria]);
+      const [result] = await db.execute(query, [usuarioId, publicacionId]);
+      
+      console.log('✅ Publicación marcada exitosamente. ID:', result.insertId);
       return result.insertId;
     } catch (error) {
+      console.error('❌ Error al marcar "No me interesa":', error);
       throw error;
     }
   }
 
   /**
-   * Desmarcar "No me interesa" de una publicación
+   * Desmarcar "No me interesa" (vuelve a mostrar la publicación)
    * @param {number} usuarioId - ID del usuario
    * @param {number} publicacionId - ID de la publicación
    * @returns {Promise<boolean>}
    */
   static async desmarcar(usuarioId, publicacionId) {
     try {
+      console.log('👍 Desmarcando "No me interesa":', { usuarioId, publicacionId });
+      
       const query = `
         DELETE FROM publicaciones_no_interesa 
         WHERE usuario_id = ? AND publicacion_id = ?
       `;
-      await db.execute(query, [usuarioId, publicacionId]);
+      const [result] = await db.execute(query, [usuarioId, publicacionId]);
+      
+      console.log('✅ Publicación desmarcada. Filas afectadas:', result.affectedRows);
       return true;
     } catch (error) {
+      console.error('❌ Error al desmarcar:', error);
       throw error;
     }
   }
@@ -76,14 +77,16 @@ class PublicacionNoInteresa {
       const [result] = await db.execute(query, [usuarioId, publicacionId]);
       return result.length > 0;
     } catch (error) {
+      console.error('❌ Error al verificar:', error);
       throw error;
     }
   }
 
   /**
    * Obtener IDs de publicaciones marcadas como "No me interesa" por usuario
+   * Útil para filtrar el feed
    * @param {number} usuarioId - ID del usuario
-   * @returns {Promise<Array<number>>} Array de IDs de publicaciones
+   * @returns {Promise<Array<number>>} Array de IDs de publicaciones ocultas
    */
   static async obtenerIdsPorUsuario(usuarioId) {
     try {
@@ -94,36 +97,7 @@ class PublicacionNoInteresa {
       const [result] = await db.execute(query, [usuarioId]);
       return result.map(r => r.publicacion_id);
     } catch (error) {
-      throw error;
-    }
-  }
-
-  /**
-   * Obtener categorías que el usuario ha marcado frecuentemente como "No me interesa"
-   * Solo devuelve categorías con 3 o más marcas
-   * @param {number} usuarioId - ID del usuario
-   * @returns {Promise<Array>} Array con categorías y estadísticas
-   */
-  static async obtenerCategoriasNoInteresan(usuarioId) {
-    try {
-      const query = `
-        SELECT 
-          categoria,
-          COUNT(*) as total,
-          (COUNT(*) * 100.0 / (
-            SELECT COUNT(*) 
-            FROM publicaciones_no_interesa 
-            WHERE usuario_id = ?
-          )) as porcentaje
-        FROM publicaciones_no_interesa
-        WHERE usuario_id = ? AND categoria IS NOT NULL
-        GROUP BY categoria
-        HAVING total >= 3
-        ORDER BY total DESC
-      `;
-      const [result] = await db.execute(query, [usuarioId, usuarioId]);
-      return result;
-    } catch (error) {
+      console.error('❌ Error al obtener IDs:', error);
       throw error;
     }
   }
@@ -131,32 +105,36 @@ class PublicacionNoInteresa {
   /**
    * Obtener todas las publicaciones marcadas como "No me interesa" con información completa
    * @param {number} usuarioId - ID del usuario
-   * @returns {Promise<Array>} Array de publicaciones
+   * @returns {Promise<Array>} Array de publicaciones ocultas
    */
   static async obtenerTodas(usuarioId) {
     try {
+      console.log('📊 Consultando publicaciones ocultas para usuario:', usuarioId);
+      
       const query = `
         SELECT 
           p.id,
           p.contenido,
           p.categoria,
-          p.tipo_publicacion,
           p.fecha_creacion as fecha_publicacion,
           u.id as autor_id,
           u.nombre_completo,
           u.nombre_usuario,
-          u.foto_perfil,
-          pni.fecha_creacion as fecha_marcado,
-          pni.categoria as categoria_guardada
+          u.foto_perfil_s3 as foto_perfil,
+          pni.fecha_creacion as fecha_ocultada
         FROM publicaciones p
         INNER JOIN publicaciones_no_interesa pni ON p.id = pni.publicacion_id
-        INNER JOIN usuarios u ON p.usuario_id = u.id
+        LEFT JOIN usuarios u ON p.usuario_id = u.id
         WHERE pni.usuario_id = ?
         ORDER BY pni.fecha_creacion DESC
       `;
       const [publicaciones] = await db.execute(query, [usuarioId]);
+      
+      console.log('✅ Publicaciones ocultas obtenidas:', publicaciones.length);
+      
       return publicaciones;
     } catch (error) {
+      console.error('❌ Error en obtenerTodas:', error);
       throw error;
     }
   }
@@ -164,7 +142,7 @@ class PublicacionNoInteresa {
   /**
    * Contar total de publicaciones marcadas como "No me interesa" por usuario
    * @param {number} usuarioId - ID del usuario
-   * @returns {Promise<number>} Total de publicaciones marcadas
+   * @returns {Promise<number>} Total de publicaciones ocultas
    */
   static async contarPorUsuario(usuarioId) {
     try {
@@ -176,36 +154,7 @@ class PublicacionNoInteresa {
       const [result] = await db.execute(query, [usuarioId]);
       return result[0].total;
     } catch (error) {
-      throw error;
-    }
-  }
-
-  /**
-   * Obtener estadísticas generales de "No me interesa" del usuario
-   * @param {number} usuarioId - ID del usuario
-   * @returns {Promise<Object>} Objeto con estadísticas
-   */
-  static async obtenerEstadisticas(usuarioId) {
-    try {
-      const query = `
-        SELECT 
-          COUNT(DISTINCT publicacion_id) as total_publicaciones,
-          COUNT(DISTINCT categoria) as total_categorias,
-          COUNT(DISTINCT DATE(fecha_creacion)) as dias_activos,
-          MIN(fecha_creacion) as primera_marca,
-          MAX(fecha_creacion) as ultima_marca
-        FROM publicaciones_no_interesa
-        WHERE usuario_id = ?
-      `;
-      const [result] = await db.execute(query, [usuarioId]);
-      return result[0] || {
-        total_publicaciones: 0,
-        total_categorias: 0,
-        dias_activos: 0,
-        primera_marca: null,
-        ultima_marca: null
-      };
-    } catch (error) {
+      console.error('❌ Error al contar:', error);
       throw error;
     }
   }
@@ -217,32 +166,18 @@ class PublicacionNoInteresa {
    */
   static async limpiarTodas(usuarioId) {
     try {
+      console.log('🗑️ Limpiando todas las marcas del usuario:', usuarioId);
+      
       const query = `
         DELETE FROM publicaciones_no_interesa 
         WHERE usuario_id = ?
       `;
       const [result] = await db.execute(query, [usuarioId]);
+      
+      console.log('✅ Marcas eliminadas:', result.affectedRows);
       return result.affectedRows;
     } catch (error) {
-      throw error;
-    }
-  }
-
-  /**
-   * Limpiar marcas "No me interesa" de una categoría específica
-   * @param {number} usuarioId - ID del usuario
-   * @param {string} categoria - Categoría a limpiar
-   * @returns {Promise<number>} Cantidad de registros eliminados
-   */
-  static async limpiarPorCategoria(usuarioId, categoria) {
-    try {
-      const query = `
-        DELETE FROM publicaciones_no_interesa 
-        WHERE usuario_id = ? AND categoria = ?
-      `;
-      const [result] = await db.execute(query, [usuarioId, categoria]);
-      return result.affectedRows;
-    } catch (error) {
+      console.error('❌ Error al limpiar:', error);
       throw error;
     }
   }

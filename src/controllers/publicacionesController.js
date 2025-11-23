@@ -7,7 +7,7 @@ const { successResponse, errorResponse } = require('../utils/responses');
 
 /**
  * ============================================
- * CONTROLADOR DE PUBLICACIONES CON CENSURA + DOCUMENTOS
+ * CONTROLADOR DE PUBLICACIONES CON CENSURA + DOCUMENTOS + VISIBILIDAD
  * ============================================
  */
 
@@ -25,7 +25,20 @@ exports.obtenerCategorias = async (req, res) => {
 };
 
 /**
- * 🆕 CREAR PUBLICACIÓN - CON IMAGEN Y DOCUMENTOS
+ * OBTENER OPCIONES DE VISIBILIDAD
+ * GET /api/publicaciones/visibilidades
+ */
+exports.obtenerVisibilidades = async (req, res) => {
+  try {
+    const visibilidades = Publicacion.getVisibilidades();
+    return successResponse(res, visibilidades, 'Opciones de visibilidad disponibles');
+  } catch (error) {
+    return errorResponse(res, 'Error al obtener visibilidades', 500);
+  }
+};
+
+/**
+ * 🆕 CREAR PUBLICACIÓN - CON IMAGEN, DOCUMENTOS Y VISIBILIDAD
  * POST /api/publicaciones
  */
 exports.crearPublicacion = async (req, res) => {
@@ -33,11 +46,10 @@ exports.crearPublicacion = async (req, res) => {
   let documentosSubidos = [];
   
   try {
-    const { contenido, categoria } = req.body;
+    const { contenido, categoria, visibilidad } = req.body;
 
     // Validar contenido
     if (!contenido || contenido.trim().length === 0) {
-      // Limpiar archivos subidos
       if (req.files?.imagen?.[0]) {
         await deleteFromS3(req.files.imagen[0].location).catch(() => {});
       }
@@ -79,6 +91,26 @@ exports.crearPublicacion = async (req, res) => {
       );
     }
 
+    // Validar visibilidad
+    const visibilidadesValidas = ['publico', 'privado', 'seguidores'];
+    const visibilidadFinal = visibilidad || 'publico';
+    
+    if (!visibilidadesValidas.includes(visibilidadFinal)) {
+      if (req.files?.imagen?.[0]) {
+        await deleteFromS3(req.files.imagen[0].location).catch(() => {});
+      }
+      if (req.files?.documentos) {
+        for (const doc of req.files.documentos) {
+          await deleteFromS3(doc.location).catch(() => {});
+        }
+      }
+      return errorResponse(
+        res, 
+        `Visibilidad inválida. Debe ser: ${visibilidadesValidas.join(', ')}`, 
+        400
+      );
+    }
+
     // 🔍 ANÁLISIS DE CENSURA - CONTENIDO
     const analisisContenido = await CensuraPublicaciones.validarContenido(
       contenido, 
@@ -110,7 +142,6 @@ exports.crearPublicacion = async (req, res) => {
       );
     }
 
-    // Marcar imagen como subida
     if (req.files?.imagen?.[0]) {
       imagenSubida = true;
     }
@@ -161,13 +192,14 @@ exports.crearPublicacion = async (req, res) => {
       requiereRevision = true;
     }
 
-    // 📝 CREAR PUBLICACIÓN EN BD
+    // 📝 CREAR PUBLICACIÓN EN BD CON VISIBILIDAD
     const nuevaPublicacionId = await Publicacion.crear({
       usuario_id: req.usuario.id,
       contenido,
       imagen_url: null,
       imagen_s3: req.files?.imagen?.[0]?.location || null,
       categoria: categoria || 'General',
+      visibilidad: visibilidadFinal,
       requiere_revision: requiereRevision ? 1 : 0,
       analisis_censura: JSON.stringify(reporte)
     });
@@ -198,13 +230,12 @@ exports.crearPublicacion = async (req, res) => {
           console.log(`✅ Documento ${documentoId} vinculado a publicación ${nuevaPublicacionId}`);
         } catch (docError) {
           console.error('❌ Error al guardar documento:', docError);
-          // Continuar con los demás documentos
         }
       }
     }
 
     // Obtener publicación completa con documentos
-    const publicacion = await Publicacion.obtenerPorId(nuevaPublicacionId);
+    const publicacion = await Publicacion.obtenerPorId(nuevaPublicacionId, req.usuario.id);
 
     return successResponse(
       res, 
@@ -220,7 +251,6 @@ exports.crearPublicacion = async (req, res) => {
   } catch (error) {
     console.error('❌ Error al crear publicación:', error);
 
-    // Limpiar archivos subidos en caso de error
     if (req.files?.imagen?.[0] && imagenSubida) {
       await deleteFromS3(req.files.imagen[0].location).catch(() => {});
     }
@@ -236,7 +266,7 @@ exports.crearPublicacion = async (req, res) => {
 };
 
 /**
- * OBTENER PUBLICACIONES (FEED)
+ * OBTENER PUBLICACIONES (FEED) - CON RESPETO A VISIBILIDAD
  * GET /api/publicaciones
  */
 exports.obtenerPublicaciones = async (req, res) => {
@@ -244,8 +274,9 @@ exports.obtenerPublicaciones = async (req, res) => {
     let publicaciones;
 
     if (!req.usuario || !req.usuario.id) {
+      // Usuario no autenticado: solo públicas
       publicaciones = await Publicacion.obtenerAleatorias(20);
-      return successResponse(res, publicaciones, 'Publicaciones aleatorias');
+      return successResponse(res, publicaciones, 'Publicaciones públicas');
     }
 
     try {
@@ -266,7 +297,7 @@ exports.obtenerPublicaciones = async (req, res) => {
       return successResponse(res, publicaciones, 'Feed personalizado');
       
     } catch (feedError) {
-      publicaciones = await Publicacion.obtenerTodas();
+      publicaciones = await Publicacion.obtenerTodas(req.usuario.id);
       
       if (!publicaciones || publicaciones.length === 0) {
         return successResponse(res, [], 'No hay publicaciones disponibles');
@@ -277,7 +308,7 @@ exports.obtenerPublicaciones = async (req, res) => {
     
   } catch (error) {
     try {
-      const publicacionesBackup = await Publicacion.obtenerTodas();
+      const publicacionesBackup = await Publicacion.obtenerTodas(req.usuario?.id);
       return successResponse(res, publicacionesBackup || [], 'Publicaciones (modo backup)');
     } catch (backupError) {
       return errorResponse(res, 'Error al obtener publicaciones', 500);
@@ -286,16 +317,18 @@ exports.obtenerPublicaciones = async (req, res) => {
 };
 
 /**
- * OBTENER UNA PUBLICACIÓN POR ID
+ * OBTENER UNA PUBLICACIÓN POR ID - CON VALIDACIÓN DE VISIBILIDAD
  * GET /api/publicaciones/:id
  */
 exports.obtenerPublicacion = async (req, res) => {
   try {
     const { id } = req.params;
-    const publicacion = await Publicacion.obtenerPorId(id);
+    const usuarioActualId = req.usuario?.id || null;
+    
+    const publicacion = await Publicacion.obtenerPorId(id, usuarioActualId);
 
     if (!publicacion) {
-      return errorResponse(res, 'Publicación no encontrada', 404);
+      return errorResponse(res, 'Publicación no encontrada o no tienes permiso para verla', 404);
     }
 
     return successResponse(res, publicacion, 'Publicación encontrada');
@@ -310,7 +343,7 @@ exports.obtenerPublicacion = async (req, res) => {
  */
 exports.obtenerMisPublicaciones = async (req, res) => {
   try {
-    const publicaciones = await Publicacion.obtenerPorUsuario(req.usuario.id);
+    const publicaciones = await Publicacion.obtenerPorUsuario(req.usuario.id, req.usuario.id);
     
     return successResponse(
       res, 
@@ -323,13 +356,15 @@ exports.obtenerMisPublicaciones = async (req, res) => {
 };
 
 /**
- * OBTENER PUBLICACIONES DE OTRO USUARIO
+ * OBTENER PUBLICACIONES DE OTRO USUARIO - CON RESPETO A VISIBILIDAD
  * GET /api/publicaciones/usuario/:usuarioId
  */
 exports.obtenerPublicacionesUsuario = async (req, res) => {
   try {
     const { usuarioId } = req.params;
-    const publicaciones = await Publicacion.obtenerPorUsuario(usuarioId);
+    const usuarioActualId = req.usuario?.id || null;
+    
+    const publicaciones = await Publicacion.obtenerPorUsuario(usuarioId, usuarioActualId);
     return successResponse(res, publicaciones, 'Publicaciones del usuario');
   } catch (error) {
     return errorResponse(res, 'Error al obtener publicaciones del usuario', 500);
@@ -337,7 +372,7 @@ exports.obtenerPublicacionesUsuario = async (req, res) => {
 };
 
 /**
- * ACTUALIZAR PUBLICACIÓN - CON VALIDACIÓN PREVIA A S3
+ * ACTUALIZAR PUBLICACIÓN - CON VISIBILIDAD
  * PUT /api/publicaciones/:id
  */
 exports.actualizarPublicacion = async (req, res) => {
@@ -345,9 +380,9 @@ exports.actualizarPublicacion = async (req, res) => {
 
   try {
     const { id } = req.params;
-    const { contenido, categoria } = req.body;
+    const { contenido, categoria, visibilidad } = req.body;
 
-    const publicacionActual = await Publicacion.obtenerPorId(id);
+    const publicacionActual = await Publicacion.obtenerPorId(id, req.usuario.id);
     if (!publicacionActual) {
       if (req.file) {
         await deleteFromS3(req.file.location).catch(() => {});
@@ -376,6 +411,17 @@ exports.actualizarPublicacion = async (req, res) => {
           await deleteFromS3(req.file.location).catch(() => {});
         }
         return errorResponse(res, `Categoría inválida`, 400);
+      }
+    }
+
+    // Validar visibilidad
+    if (visibilidad) {
+      const visibilidadesValidas = ['publico', 'privado', 'seguidores'];
+      if (!visibilidadesValidas.includes(visibilidad)) {
+        if (req.file) {
+          await deleteFromS3(req.file.location).catch(() => {});
+        }
+        return errorResponse(res, 'Visibilidad inválida', 400);
       }
     }
 
@@ -427,6 +473,8 @@ exports.actualizarPublicacion = async (req, res) => {
     const datosActualizar = {};
     if (contenido) datosActualizar.contenido = contenido;
     if (categoria) datosActualizar.categoria = categoria;
+    if (visibilidad) datosActualizar.visibilidad = visibilidad;
+    
     if (req.file) {
       if (publicacionActual.imagen_s3) {
         await deleteFromS3(publicacionActual.imagen_s3).catch(() => {});
@@ -444,7 +492,7 @@ exports.actualizarPublicacion = async (req, res) => {
       return errorResponse(res, 'No se pudo actualizar la publicación', 400);
     }
 
-    const publicacionActualizada = await Publicacion.obtenerPorId(id);
+    const publicacionActualizada = await Publicacion.obtenerPorId(id, req.usuario.id);
 
     return successResponse(res, publicacionActualizada, 'Publicación actualizada correctamente');
 
@@ -457,6 +505,28 @@ exports.actualizarPublicacion = async (req, res) => {
   }
 };
 
+
+exports.obtenerDocumentosUsuario = async (req, res) => {
+  try {
+    const { usuario_id } = req.params;
+
+    console.log('📄 Obteniendo documentos del usuario:', usuario_id);
+
+    const documentos = await Documento.obtenerPorUsuario(usuario_id);
+
+    console.log('✅ Documentos encontrados:', documentos.length);
+
+    return successResponse(
+      res,
+      documentos,
+      documentos.length > 0 ? `${documentos.length} documento(s) encontrado(s)` : 'Este usuario no tiene documentos'
+    );
+  } catch (error) {
+    console.error('❌ Error al obtener documentos del usuario:', error);
+    return errorResponse(res, 'Error al obtener los documentos del usuario', 500);
+  }
+};
+
 /**
  * 🆕 ELIMINAR PUBLICACIÓN (con documentos)
  * DELETE /api/publicaciones/:id
@@ -465,7 +535,7 @@ exports.eliminarPublicacion = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const publicacion = await Publicacion.obtenerPorId(id);
+    const publicacion = await Publicacion.obtenerPorId(id, req.usuario.id);
     
     if (!publicacion) {
       return errorResponse(res, 'Publicación no encontrada', 404);

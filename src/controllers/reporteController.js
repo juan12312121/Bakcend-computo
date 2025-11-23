@@ -7,9 +7,6 @@ const { successResponse, errorResponse } = require('../utils/responses');
 // REPORTES
 // ==========================================
 
-/**
- * Crear un reporte de una publicación
- */
 exports.crearReporte = async (req, res) => {
   try {
     const { publicacionId, motivo, descripcion } = req.body;
@@ -62,9 +59,6 @@ exports.crearReporte = async (req, res) => {
   }
 };
 
-/**
- * Obtener reportes de una publicación específica
- */
 exports.obtenerReportes = async (req, res) => {
   try {
     const { publicacionId } = req.params;
@@ -81,9 +75,6 @@ exports.obtenerReportes = async (req, res) => {
   }
 };
 
-/**
- * Obtener todos los reportes del sistema
- */
 exports.obtenerTodosReportes = async (req, res) => {
   try {
     const reportes = await Reporte.obtenerTodos();
@@ -94,9 +85,6 @@ exports.obtenerTodosReportes = async (req, res) => {
   }
 };
 
-/**
- * Obtener estadísticas de reportes por usuario
- */
 exports.obtenerEstadisticasReportes = async (req, res) => {
   try {
     const stats = await Reporte.obtenerEstadisticasUsuarios();
@@ -111,9 +99,6 @@ exports.obtenerEstadisticasReportes = async (req, res) => {
 // PUBLICACIONES OCULTAS
 // ==========================================
 
-/**
- * Ocultar una publicación (propia o de otros)
- */
 exports.ocultarPublicacion = async (req, res) => {
   try {
     const { publicacionId } = req.body;
@@ -131,9 +116,6 @@ exports.ocultarPublicacion = async (req, res) => {
   }
 };
 
-/**
- * Mostrar una publicación previamente oculta
- */
 exports.mostrarPublicacion = async (req, res) => {
   try {
     const { publicacionId } = req.body;
@@ -151,9 +133,6 @@ exports.mostrarPublicacion = async (req, res) => {
   }
 };
 
-/**
- * Obtener todas las publicaciones ocultas por el usuario
- */
 exports.obtenerPublicacionesOcultas = async (req, res) => {
   try {
     const usuarioId = req.usuario.id;
@@ -165,9 +144,6 @@ exports.obtenerPublicacionesOcultas = async (req, res) => {
   }
 };
 
-/**
- * Ocultar TODAS las publicaciones propias del usuario
- */
 exports.ocultarTodasPropias = async (req, res) => {
   try {
     const usuarioId = req.usuario.id;
@@ -184,9 +160,6 @@ exports.ocultarTodasPropias = async (req, res) => {
   }
 };
 
-/**
- * Mostrar TODAS las publicaciones propias del usuario
- */
 exports.mostrarTodasPropias = async (req, res) => {
   try {
     const usuarioId = req.usuario.id;
@@ -203,9 +176,6 @@ exports.mostrarTodasPropias = async (req, res) => {
   }
 };
 
-/**
- * Obtener solo las publicaciones propias que están ocultas
- */
 exports.obtenerPropiasOcultas = async (req, res) => {
   try {
     const usuarioId = req.usuario.id;
@@ -222,12 +192,9 @@ exports.obtenerPropiasOcultas = async (req, res) => {
 };
 
 // ==========================================
-// NO ME INTERESA
+// NO ME INTERESA (SIMPLIFICADO)
 // ==========================================
 
-/**
- * Marcar una publicación como "No me interesa"
- */
 exports.marcarNoInteresa = async (req, res) => {
   try {
     const { publicacionId } = req.body;
@@ -239,24 +206,18 @@ exports.marcarNoInteresa = async (req, res) => {
 
     const id = await PublicacionNoInteresa.marcar(usuarioId, publicacionId);
     
-    // Obtener cuántas publicaciones ha marcado
-    const total = await PublicacionNoInteresa.contarPorUsuario(usuarioId);
-    
     return successResponse(
       res, 
-      { id, publicacionId, totalMarcadas: total }, 
-      '✓ Marcado como "No me interesa". Verás menos publicaciones similares',
+      { id, publicacionId }, 
+      'Publicación ocultada. No la verás más en tu feed',
       201
     );
   } catch (error) {
-    console.error('Error al marcar "No me interesa":', error);
-    return errorResponse(res, 'Error al marcar "No me interesa"', 500);
+    console.error('❌ Error al ocultar publicación:', error);
+    return errorResponse(res, 'Error al ocultar publicación', 500);
   }
 };
 
-/**
- * Desmarcar "No me interesa" de una publicación
- */
 exports.desmarcarNoInteresa = async (req, res) => {
   try {
     const { publicacionId } = req.body;
@@ -267,70 +228,40 @@ exports.desmarcarNoInteresa = async (req, res) => {
     }
 
     await PublicacionNoInteresa.desmarcar(usuarioId, publicacionId);
-    return successResponse(res, { publicacionId }, 'Desmarcado "No me interesa"');
+    return successResponse(res, { publicacionId }, 'Publicación visible nuevamente');
   } catch (error) {
-    console.error('Error al desmarcar "No me interesa":', error);
-    return errorResponse(res, 'Error al desmarcar "No me interesa"', 500);
+    console.error('❌ Error al mostrar publicación:', error);
+    return errorResponse(res, 'Error al mostrar publicación', 500);
   }
 };
 
-/**
- * Obtener todas las publicaciones marcadas como "No me interesa"
- */
 exports.obtenerPublicacionesNoInteresan = async (req, res) => {
   try {
     const usuarioId = req.usuario.id;
+    
+    console.log('🔍 Obteniendo publicaciones ocultas para usuario:', usuarioId);
+    
     const publicaciones = await PublicacionNoInteresa.obtenerTodas(usuarioId);
+    
+    console.log('✅ Publicaciones obtenidas:', publicaciones.length);
+    
     return successResponse(
       res, 
       publicaciones, 
-      'Publicaciones "No me interesa" obtenidas exitosamente'
+      'Publicaciones ocultas obtenidas exitosamente'
     );
   } catch (error) {
-    console.error('Error al obtener publicaciones "No me interesa":', error);
-    return errorResponse(res, 'Error al obtener publicaciones "No me interesa"', 500);
+    console.error('❌ Error completo en obtenerPublicacionesNoInteresan:', {
+      mensaje: error.message,
+      stack: error.stack,
+      code: error.code,
+      sqlMessage: error.sqlMessage,
+      sql: error.sql
+    });
+    return errorResponse(res, 'Error al obtener publicaciones ocultas', 500);
   }
 };
 
-/**
- * Obtener categorías que el usuario ha marcado frecuentemente como "No me interesa"
- */
-exports.obtenerCategoriasNoInteresan = async (req, res) => {
-  try {
-    const usuarioId = req.usuario.id;
-    const categorias = await PublicacionNoInteresa.obtenerCategoriasNoInteresan(usuarioId);
-    return successResponse(
-      res, 
-      categorias, 
-      'Categorías que no te interesan obtenidas exitosamente'
-    );
-  } catch (error) {
-    console.error('Error al obtener categorías:', error);
-    return errorResponse(res, 'Error al obtener categorías', 500);
-  }
-};
-
-/**
- * Obtener estadísticas generales de "No me interesa" del usuario
- */
-exports.obtenerEstadisticasNoInteresa = async (req, res) => {
-  try {
-    const usuarioId = req.usuario.id;
-    const stats = await PublicacionNoInteresa.obtenerEstadisticas(usuarioId);
-    return successResponse(
-      res, 
-      stats, 
-      'Estadísticas de "No me interesa" obtenidas exitosamente'
-    );
-  } catch (error) {
-    console.error('Error al obtener estadísticas:', error);
-    return errorResponse(res, 'Error al obtener estadísticas', 500);
-  }
-};
-
-/**
- * Limpiar todas las marcas "No me interesa" del usuario
- */
 exports.limpiarNoInteresa = async (req, res) => {
   try {
     const usuarioId = req.usuario.id;
@@ -339,35 +270,10 @@ exports.limpiarNoInteresa = async (req, res) => {
     return successResponse(
       res, 
       { cantidad }, 
-      `${cantidad} marca(s) de "No me interesa" eliminada(s)`
+      `${cantidad} publicación(es) visible(s) nuevamente`
     );
   } catch (error) {
-    console.error('Error al limpiar "No me interesa":', error);
-    return errorResponse(res, 'Error al limpiar "No me interesa"', 500);
-  }
-};
-
-/**
- * Limpiar marcas "No me interesa" de una categoría específica
- */
-exports.limpiarNoInteresaCategoria = async (req, res) => {
-  try {
-    const { categoria } = req.body;
-    const usuarioId = req.usuario.id;
-
-    if (!categoria) {
-      return errorResponse(res, 'Categoría es obligatoria', 400);
-    }
-
-    const cantidad = await PublicacionNoInteresa.limpiarPorCategoria(usuarioId, categoria);
-    
-    return successResponse(
-      res, 
-      { categoria, cantidad }, 
-      `${cantidad} marca(s) de "No me interesa" eliminada(s) de la categoría "${categoria}"`
-    );
-  } catch (error) {
-    console.error('Error al limpiar categoría:', error);
-    return errorResponse(res, 'Error al limpiar categoría', 500);
+    console.error('❌ Error al limpiar publicaciones ocultas:', error);
+    return errorResponse(res, 'Error al limpiar publicaciones ocultas', 500);
   }
 };

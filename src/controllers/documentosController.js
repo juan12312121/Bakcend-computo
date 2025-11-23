@@ -58,6 +58,24 @@ exports.subirDocumento = async (req, res) => {
   }
 };
 
+exports.obtenerDocumentosUsuario = async (req, res) => {
+  try {
+    const { usuario_id } = req.params;
+    const documentos = await Documento.obtenerPorUsuario(usuario_id);
+
+    return successResponse(
+      res,
+      documentos,
+      documentos.length > 0 
+        ? `${documentos.length} documento(s) del usuario` 
+        : 'El usuario no tiene documentos'
+    );
+  } catch (error) {
+    console.error('Error al obtener documentos del usuario:', error);
+    return errorResponse(res, 'Error al obtener documentos del usuario', 500);
+  }
+};
+
 /**
  * OBTENER MIS DOCUMENTOS
  * GET /api/documentos/mis-documentos

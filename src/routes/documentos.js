@@ -22,6 +22,9 @@ const handleUploadError = (err, req, res, next) => {
 // Obtener mis documentos - DEBE IR ANTES DE /:id
 router.get('/mis-documentos', proteger, documentosController.obtenerMisDocumentos);
 
+// 🆕 Obtener documentos de un usuario específico (PÚBLICO)
+router.get('/usuario/:usuario_id', documentosController.obtenerDocumentosUsuario);
+
 // 🆕 Obtener documentos de una publicación específica
 router.get('/publicacion/:publicacion_id', proteger, documentosController.obtenerDocumentosPorPublicacion);
 
@@ -62,4 +65,4 @@ router.get('/', documentosController.obtenerTodosDocumentos);
 // Obtener documento por ID - DEBE IR AL FINAL
 router.get('/:id', documentosController.obtenerDocumento);
 
-module.exports = router;
+module.exports = router; 

@@ -41,17 +41,22 @@ app.use(helmet({
 }));
 
 app.use(cors({
-  origin: [
-    'http://localhost:4200',
-    'http://13.59.190.199:4200',
-    'http://3.146.83.30:4200',
-    /^http:\/\/3\.144\.201\.57(:\d+)?$/,
-    'http://angular-webapp-frontend.s3-website.us-east-2.amazonaws.com'
-  ],
+  origin: (origin, callback) => {
+    callback(null, true); // acepta cualquier origen
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Cache-Control', 'X-Requested-With'], // 🆕 Para SSE
-  exposedHeaders: ['Content-Type', 'Cache-Control'] // 🆕 Para SSE
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'Cache-Control',
+    'X-Requested-With',
+    'Accept'
+  ],
+  exposedHeaders: [
+    'Content-Type',
+    'Cache-Control'
+  ]
 }));
 
 app.use(compression());
