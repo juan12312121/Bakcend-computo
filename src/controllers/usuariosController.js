@@ -203,3 +203,113 @@ exports.eliminarCuenta = async (req, res) => {
     return errorResponse(res, 'Error al eliminar cuenta', 500);
   }
 };
+
+
+exports.actualizarActividad = async (req, res) => {
+  try {
+    const usuarioId = req.usuario.id;
+    const { activo } = req.body;
+
+    // Validar que activo sea 0 o 1
+    if (activo !== 0 && activo !== 1) {
+      return res.status(400).json({
+        success: false,
+        mensaje: 'El valor de activo debe ser 0 o 1'
+      });
+    }
+
+    await Usuario.actualizarActividad(usuarioId, activo);
+
+    res.json({
+      success: true,
+      mensaje: `Estado actualizado a ${activo === 1 ? 'activo' : 'inactivo'}`,
+      data: { activo }
+    });
+
+  } catch (error) {
+    console.error('❌ Error en actualizarActividad:', error);
+    res.status(500).json({
+      success: false,
+      mensaje: 'Error al actualizar el estado de actividad'
+    });
+  }
+};
+
+// POST /api/usuarios/me/heartbeat
+exports.heartbeat = async (req, res) => {
+  try {
+    const usuarioId = req.usuario.id;
+
+    await Usuario.registrarHeartbeat(usuarioId);
+
+    res.json({
+      success: true,
+      mensaje: 'Heartbeat recibido',
+      data: { 
+        activo: 1,
+        timestamp: new Date()
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error en heartbeat:', error);
+    res.status(500).json({
+      success: false,
+      mensaje: 'Error al procesar heartbeat'
+    });
+  }
+};
+
+// GET /api/usuarios/activos
+exports.obtenerUsuariosActivos = async (req, res) => {
+  try {
+    const usuarios = await Usuario.obtenerActivos();
+
+    res.json({
+      success: true,
+      mensaje: 'Usuarios activos obtenidos',
+      data: usuarios
+    });
+
+  } catch (error) {
+    console.error('❌ Error en obtenerUsuariosActivos:', error);
+    res.status(500).json({
+      success: false,
+      mensaje: 'Error al obtener usuarios activos'
+    });
+  }
+};
+
+exports.obtenerSeguidoresActivos = async (req, res) => {
+  try {
+    const usuarioId = req.usuario.id;
+    
+    console.log('🎯 [CONTROLLER] obtenerSeguidoresActivos iniciado');
+    console.log('👤 [CONTROLLER] Usuario autenticado:', {
+      id: usuarioId,
+      email: req.usuario.email,
+      nombre: req.usuario.nombre_usuario
+    });
+
+    const seguidores = await Usuario.obtenerSeguidoresActivos(usuarioId);
+
+    console.log('✅ [CONTROLLER] Seguidores obtenidos:', {
+      cantidad: seguidores.length,
+      usuarioId: usuarioId
+    });
+
+    res.json({
+      success: true,
+      mensaje: `${seguidores.length} seguidores activos encontrados`,
+      data: seguidores
+    });
+
+  } catch (error) {
+    console.error('❌ [CONTROLLER] Error en obtenerSeguidoresActivos:', error);
+    console.error('❌ [CONTROLLER] Stack:', error.stack);
+    res.status(500).json({
+      success: false,
+      mensaje: 'Error al obtener seguidores activos'
+    });
+  }
+};

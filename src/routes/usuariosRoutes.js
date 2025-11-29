@@ -1,3 +1,5 @@
+// routes/usuarios.js - Archivo completo actualizado
+
 const express = require('express');
 const router = express.Router();
 const usuariosController = require('../controllers/usuariosController');
@@ -5,7 +7,7 @@ const { proteger } = require('../middlewares/auth');
 const { validarActualizarPerfil } = require('../utils/validators');
 const { validarResultado } = require('../middlewares/validation');
 
-// Intentar usar AWS S3 si existe configuración válida
+// Configuración de upload
 let upload;
 try {
   const awsConfig = require('../config/aws');
@@ -21,18 +23,10 @@ try {
   upload = multerConfig.upload;
 }
 
-// ================= RUTAS =================
-
-// GET /api/usuarios/me - Mi perfil
+// ================= RUTAS DE PERFIL =================
 router.get('/me', proteger, usuariosController.obtenerMiPerfil);
-
-// GET /api/usuarios/buscar?q=juan - Buscar usuarios
 router.get('/buscar', proteger, usuariosController.buscarUsuarios);
 
-// GET /api/usuarios/:id - Perfil de un usuario
-router.get('/:id', proteger, usuariosController.obtenerPerfil);
-
-// PUT /api/usuarios/me - Actualizar perfil con imágenes
 router.put(
   '/me',
   proteger,
@@ -45,7 +39,24 @@ router.put(
   usuariosController.actualizarPerfil
 );
 
-// DELETE /api/usuarios/me - Eliminar cuenta
 router.delete('/me', proteger, usuariosController.eliminarCuenta);
+
+// ================= RUTAS DE ACTIVIDAD =================
+
+// PUT /api/usuarios/me/actividad - Actualizar estado de actividad
+router.put('/me/actividad', proteger, usuariosController.actualizarActividad);
+
+// POST /api/usuarios/me/heartbeat - Enviar heartbeat para mantener activo
+router.post('/me/heartbeat', proteger, usuariosController.heartbeat);
+
+// 👉 GET /api/usuarios/me/seguidores/activos - Obtener MIS seguidores activos
+router.get('/me/seguidores/activos', proteger, usuariosController.obtenerSeguidoresActivos);
+
+// GET /api/usuarios/activos - Obtener todos los usuarios activos (general)
+router.get('/activos', proteger, usuariosController.obtenerUsuariosActivos);
+
+// ⚠️ IMPORTANTE: Esta ruta debe ir AL FINAL para no interferir con otras rutas
+// GET /api/usuarios/:id - Perfil de un usuario por ID
+router.get('/:id', proteger, usuariosController.obtenerPerfil);
 
 module.exports = router;
