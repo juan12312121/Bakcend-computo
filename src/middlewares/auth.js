@@ -1,38 +1,85 @@
-const jwt = require('jsonwebtoken');
-const { errorResponse } = require('../utils/responses');
+// middlewares/auth.js
 
-exports.proteger = async (req, res, next) => {
+const jwt = require('jsonwebtoken');
+
+const proteger = async (req, res, next) => {
+  console.log('');
+  console.log('🔐 ===================================');
+  console.log('🔐 MIDDLEWARE DE AUTENTICACIÓN');
+  console.log('🔐 ===================================');
+  console.log('📍 Ruta:', req.method, req.originalUrl);
+  console.log('📦 Body:', JSON.stringify(req.body, null, 2));
+  
   try {
-    let token;
+    const authHeader = req.headers.authorization;
+    console.log('🔑 Authorization header:', authHeader ? '✅ Presente' : '❌ Ausente');
     
-    // Obtener token del header Authorization
-    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
-      token = req.headers.authorization.split(' ')[1];
+    if (!authHeader) {
+      console.log('❌ No hay token de autorización');
+      console.log('🔐 ===================================');
+      console.log('');
+      return res.status(401).json({
+        success: false,
+        mensaje: 'No autorizado - Token no proporcionado'
+      });
     }
-    
-    // Verificar si existe el token
-    if (!token) {
-      return errorResponse(res, 'No autorizado. Token no proporcionado', 401);
+
+    const token = authHeader.startsWith('Bearer ')
+      ? authHeader.slice(7)
+      : authHeader;
+
+    console.log('🔍 Token extraído:', token.substring(0, 20) + '...');
+
+    if (!process.env.JWT_SECRET) {
+      console.error('❌ JWT_SECRET no está configurado');
+      console.log('🔐 ===================================');
+      console.log('');
+      return res.status(500).json({
+        success: false,
+        mensaje: 'Error de configuración del servidor'
+      });
     }
-    
-    // Verificar token
+
+    console.log('🔓 Verificando token...');
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    
-    // Agregar usuario al request
+    console.log('✅ Token válido');
+    console.log('👤 Usuario ID:', decoded.id);
+    console.log('👤 Email:', decoded.email);
+
     req.usuario = decoded;
+    
+    console.log('✅ Autenticación exitosa - Pasando al siguiente middleware');
+    console.log('🔐 ===================================');
+    console.log('');
     
     next();
     
   } catch (error) {
-    console.error('Error en autenticación:', error.message);
+    console.error('');
+    console.error('❌ ===================================');
+    console.error('❌ ERROR EN AUTENTICACIÓN');
+    console.error('❌ ===================================');
+    console.error('Tipo de error:', error.name);
+    console.error('Mensaje:', error.message);
     
-    if (error.name === 'JsonWebTokenError') {
-      return errorResponse(res, 'Token inválido', 401);
-    }
     if (error.name === 'TokenExpiredError') {
-      return errorResponse(res, 'Token expirado', 401);
+      console.error('⏰ El token ha expirado');
+      console.error('Expiró en:', error.expiredAt);
+    } else if (error.name === 'JsonWebTokenError') {
+      console.error('🔒 Token inválido o malformado');
     }
     
-    return errorResponse(res, 'No autorizado', 401);
+    console.error('Stack:', error.stack);
+    console.error('❌ ===================================');
+    console.error('');
+
+    return res.status(401).json({
+      success: false,
+      mensaje: error.name === 'TokenExpiredError' 
+        ? 'Token expirado - Por favor inicia sesión nuevamente'
+        : 'Token inválido - No autorizado'
+    });
   }
 };
+
+module.exports = { proteger };

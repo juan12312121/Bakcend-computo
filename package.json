@@ -16,11 +16,9 @@
   ],
   "author": "",
   "license": "ISC",
-
   "engines": {
     "node": "18.x"
   },
-
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
     "aws-sdk": "^2.1692.0",
