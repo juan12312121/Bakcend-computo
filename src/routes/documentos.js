@@ -2,14 +2,13 @@ const express = require('express');
 const router = express.Router();
 const { proteger } = require('../middlewares/auth');
 const documentosController = require('../controllers/documentosController');
-const { uploadDocumentos } = require('../config/multer'); // 🔥 Cambiado de aws a multer
+const { uploadDocumentos } = require('../config/aws');
 
 // Middleware de manejo de errores para multer
 const handleUploadError = (err, req, res, next) => {
   if (err) {
-    console.error('Error de multer:', err);
-    return res.status(400).json({
-      success: false,
+    return res.status(400).json({ 
+      success: false, 
       error: err.message || 'Error al subir documento'
     });
   }
@@ -21,70 +20,49 @@ const handleUploadError = (err, req, res, next) => {
 // ============================================
 
 // Obtener mis documentos - DEBE IR ANTES DE /:id
-router.get('/mis-documentos', 
-  proteger, 
-  documentosController.obtenerMisDocumentos
-);
+router.get('/mis-documentos', proteger, documentosController.obtenerMisDocumentos);
 
 // 🆕 Obtener documentos de un usuario específico (PÚBLICO)
-router.get('/usuario/:usuario_id', 
-  documentosController.obtenerDocumentosUsuario
-);
+router.get('/usuario/:usuario_id', documentosController.obtenerDocumentosUsuario);
 
 // 🆕 Obtener documentos de una publicación específica
-router.get('/publicacion/:publicacion_id', 
-  proteger, 
-  documentosController.obtenerDocumentosPorPublicacion
-);
+router.get('/publicacion/:publicacion_id', proteger, documentosController.obtenerDocumentosPorPublicacion);
 
 // Subir documento
 router.post(
-  '/',
-  proteger,
-  uploadDocumentos.single('documento'), // 🔥 Campo 'documento'
+  '/', 
+  proteger, 
+  uploadDocumentos.single('documento'),
   handleUploadError,
   documentosController.subirDocumento
 );
 
 // 🆕 Vincular documento existente a publicación
-router.patch('/:id/vincular', 
-  proteger, 
-  documentosController.vincularDocumentoAPublicacion
-);
+router.patch('/:id/vincular', proteger, documentosController.vincularDocumentoAPublicacion);
 
 // 🆕 Desvincular documento de publicación
-router.patch('/:id/desvincular', 
-  proteger, 
-  documentosController.desvincularDocumento
-);
+router.patch('/:id/desvincular', proteger, documentosController.desvincularDocumento);
 
 // Actualizar documento
 router.put(
-  '/:id',
-  proteger,
+  '/:id', 
+  proteger, 
   uploadDocumentos.single('documento'),
   handleUploadError,
   documentosController.actualizarDocumento
 );
 
 // Eliminar documento
-router.delete('/:id', 
-  proteger, 
-  documentosController.eliminarDocumento
-);
+router.delete('/:id', proteger, documentosController.eliminarDocumento);
 
 // ============================================
 // RUTAS PÚBLICAS (AL FINAL)
 // ============================================
 
 // Obtener todos los documentos
-router.get('/', 
-  documentosController.obtenerTodosDocumentos
-);
+router.get('/', documentosController.obtenerTodosDocumentos);
 
 // Obtener documento por ID - DEBE IR AL FINAL
-router.get('/:id', 
-  documentosController.obtenerDocumento
-);
+router.get('/:id', documentosController.obtenerDocumento);
 
-module.exports = router;
+module.exports = router; 

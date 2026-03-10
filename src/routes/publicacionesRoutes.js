@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { proteger } = require('../middlewares/auth');
 const publicacionController = require('../controllers/publicacionesController');
-const { upload, uploadPublicacion } = require('../config/multer'); // ✅ Cambiado de aws a multer
+const { upload, uploadPublicacion } = require('../config/aws');
 
 /**
  * ============================================
@@ -11,7 +11,6 @@ const { upload, uploadPublicacion } = require('../config/multer'); // ✅ Cambia
  * Incluye validación de censura con Gemini
  * Soporta múltiples documentos (hasta 5)
  * Control de visibilidad: público, privado, seguidores
- * Almacenamiento: LOCAL (uploads/)
  * ============================================
  */
 
@@ -36,7 +35,7 @@ const handleUploadError = (err, req, res, next) => {
 router.get('/categorias', publicacionController.obtenerCategorias);
 
 /**
- * GET /api/publicaciones/visibilidades
+ * 🆕 GET /api/publicaciones/visibilidades
  * Obtener opciones de visibilidad disponibles
  */
 router.get('/visibilidades', publicacionController.obtenerVisibilidades);
@@ -54,14 +53,8 @@ router.get('/mis-publicaciones', proteger, publicacionController.obtenerMisPubli
  */
 router.get('/usuario/:usuarioId', publicacionController.obtenerPublicacionesUsuario);
 
-/**
- * GET /api/publicaciones/documentos/:usuario_id
- * Obtener todos los documentos de un usuario
- */
-router.get('/documentos/:usuario_id', publicacionController.obtenerDocumentosUsuario);
-
 // ============================================
-// CREAR PUBLICACIÓN CON IMAGEN + DOCUMENTOS + VISIBILIDAD
+// 🆕 CREAR PUBLICACIÓN CON IMAGEN + DOCUMENTOS + VISIBILIDAD
 // ============================================
 /**
  * POST /api/publicaciones

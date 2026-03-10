@@ -1,11 +1,23 @@
 const Comentario = require('../models/Comentario');
 const Notificacion = require('../models/Notificacion');
 const { successResponse, errorResponse } = require('../utils/responses');
-const { getIo } = require('../config/socket');
+const {
+  obtenerModelo,
+  obtenerModeloConFallback,
+  CONFIG_VALIDACION,
+  PROMPTS,
+  TIMEOUTS,
+  SAFETY_SETTINGS,
+  ejecutarConReintentos,
+  extraerJSON,
+  extraerTextoRespuesta,
+  formatearPrompt,
+  censurarManualmente
+} = require('../config/gemini');
 
 /**
  * ============================================
- * CONTROLADOR DE COMENTARIOS - SIN IA
+ * CONTROLADOR DE COMENTARIOS - VERSIÓN CORREGIDA
  * ============================================
  */
 
@@ -13,19 +25,177 @@ const comentarioController = {
 
   /**
    * ========================================
-   * CENSURAR COMENTARIO (DESACTIVADO)
+   * CENSURAR COMENTARIO CON GEMINI O MANUAL
    * ========================================
    */
   async censurarComentario(texto) {
-    return {
-      texto_censurado: texto,
-      fue_censurado: false,
-      nivel_censura: 'ninguno',
-      palabras_censuradas: 0,
-      requiere_revision: false,
-      razon: 'Aprobado automáticamente',
-      metodo: 'local'
-    };
+    console.log('');
+    console.log('========================================');
+    console.log('🔍 censurarComentario() LLAMADA');
+    console.log('📝 Texto recibido:', texto);
+    console.log('📝 Tipo:', typeof texto);
+    console.log('📝 Longitud:', texto?.length);
+    console.log('========================================');
+    
+    try {
+      let analisis = null;
+      let metodo = 'desconocido';
+      let textoCensurado = texto;
+      
+      // PASO 1: Intentar con Gemini
+      try {
+        const modelo = await obtenerModeloConFallback('FLASH');
+        
+        if (!modelo) {
+          console.log('🔧 Gemini no disponible, saltando a censura manual');
+          throw new Error('Gemini no disponible');
+        }
+        
+        console.log('🤖 Usando Gemini para censura...');
+        const prompt = formatearPrompt(PROMPTS.CENSURA_COMENTARIO, {
+          comentario: texto
+        });
+
+        const resultado = await Promise.race([
+          ejecutarConReintentos(async () => {
+            const respuesta = await modelo.generateContent({
+              contents: [{
+                role: 'user',
+                parts: [{ text: prompt }]
+              }],
+              generationConfig: CONFIG_VALIDACION,
+              safetySettings: SAFETY_SETTINGS
+            });
+
+            return extraerTextoRespuesta(respuesta);
+          }),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Timeout Gemini')), TIMEOUTS.CENSURA)
+          )
+        ]);
+
+        console.log('🔍 RESPUESTA BRUTA DE GEMINI:');
+        console.log('-----------------------------------');
+        console.log(resultado);
+        console.log('-----------------------------------');
+
+        analisis = extraerJSON(resultado);
+        console.log('📊 ANÁLISIS GEMINI PARSEADO:', JSON.stringify(analisis, null, 2));
+        
+        // VALIDAR si Gemini realmente funcionó
+        if (!analisis || analisis.error || analisis.nivel_censura === 'error') {
+          console.warn('⚠️ Gemini retornó respuesta inválida o con error');
+          console.warn('   Error detectado:', analisis?.error || 'estructura_invalida');
+          throw new Error('Respuesta Gemini inválida');
+        }
+        
+        // Si llegamos aquí, Gemini funcionó correctamente
+        metodo = 'gemini';
+        console.log('✅ Gemini funcionó correctamente');
+        
+      } catch (geminiError) {
+        // PASO 2: Fallback a censura manual
+        console.log('⚠️ Gemini falló, activando censura manual');
+        console.log('   Razón:', geminiError.message);
+        
+        analisis = censurarManualmente(texto);
+        metodo = 'manual_fallback';
+        console.log('📊 ANÁLISIS MANUAL:', JSON.stringify(analisis, null, 2));
+      }
+      
+      // PASO 3: Aplicar censura al texto
+      if (analisis.palabras_censurar && analisis.palabras_censurar.length > 0) {
+        console.log(`🔨 Censurando ${analisis.palabras_censurar.length} palabras...`);
+        
+        for (const item of analisis.palabras_censurar) {
+          const palabra = item.palabra || item;
+          if (!palabra || typeof palabra !== 'string') continue;
+          
+          const censura = '*'.repeat(palabra.length);
+          const regex = new RegExp(`\\b${palabra}\\b`, 'gi');
+          
+          const antes = textoCensurado;
+          textoCensurado = textoCensurado.replace(regex, censura);
+          
+          if (antes !== textoCensurado) {
+            console.log(`   ✓ "${palabra}" → "${censura}"`);
+          } else {
+            console.log(`   ⚠ "${palabra}" no encontrada en el texto`);
+          }
+        }
+      } else {
+        console.log('✅ No se encontraron palabras para censurar');
+      }
+
+      console.log('📝 Texto final:', textoCensurado);
+      console.log('🎯 Método usado:', metodo);
+      
+      const resultado = {
+        texto_censurado: textoCensurado,
+        fue_censurado: analisis.palabras_censurar?.length > 0,
+        nivel_censura: analisis.nivel_censura || 'ninguno',
+        palabras_censuradas: analisis.palabras_censurar?.length || 0,
+        requiere_revision: analisis.requiere_revision_humana || false,
+        razon: metodo === 'gemini' ? 'Censura por IA' : 'Censura manual (fallback)',
+        metodo
+      };
+
+      console.log('');
+      console.log('========================================');
+      console.log('📤 RETORNANDO RESULTADO:');
+      console.log(JSON.stringify(resultado, null, 2));
+      console.log('========================================');
+      console.log('');
+      
+      return resultado;
+
+    } catch (error) {
+      console.error('❌ ERROR CRÍTICO EN CENSURA:', error.message);
+      console.error('📍 Stack:', error.stack);
+      
+      // ÚLTIMO RESPALDO: Intentar censura manual de emergencia
+      try {
+        console.log('🆘 Intentando censura manual de emergencia...');
+        const analisisEmergencia = censurarManualmente(texto);
+        
+        let textoCensurado = texto;
+        if (analisisEmergencia.palabras_censurar?.length > 0) {
+          for (const item of analisisEmergencia.palabras_censurar) {
+            const palabra = item.palabra || item;
+            if (palabra && typeof palabra === 'string') {
+              const censura = '*'.repeat(palabra.length);
+              const regex = new RegExp(`\\b${palabra}\\b`, 'gi');
+              textoCensurado = textoCensurado.replace(regex, censura);
+            }
+          }
+        }
+        
+        console.log('✅ Censura de emergencia completada');
+        
+        return {
+          texto_censurado: textoCensurado,
+          fue_censurado: analisisEmergencia.palabras_censurar?.length > 0,
+          nivel_censura: analisisEmergencia.nivel_censura || 'ninguno',
+          palabras_censuradas: analisisEmergencia.palabras_censurar?.length || 0,
+          requiere_revision: true,
+          razon: 'Censura de emergencia tras error crítico',
+          metodo: 'manual_emergencia'
+        };
+      } catch (errorEmergencia) {
+        console.error('❌ Fallo total en censura de emergencia:', errorEmergencia.message);
+        
+        // ÚLTIMO ÚLTIMO RESPALDO: Marcar para revisión sin censurar
+        return {
+          texto_censurado: texto,
+          fue_censurado: false,
+          nivel_censura: 'error_critico',
+          palabras_censuradas: 0,
+          requiere_revision: true,
+          razon: 'Fallo total del sistema de censura: ' + error.message,
+          metodo: 'sin_censura'
+        };
+      }
+    }
   },
 
   /**
@@ -39,7 +209,7 @@ const comentarioController = {
     console.log('║  📝 CREAR COMENTARIO - INICIO          ║');
     console.log('╚════════════════════════════════════════╝');
     console.log('');
-
+    
     try {
       const { publicacion_id, texto } = req.body;
       const usuario_id = req.usuario.id;
@@ -70,9 +240,9 @@ const comentarioController = {
       console.log('');
       console.log('🔍 Llamando a censurarComentario()...');
       console.log('');
-
+      
       const resultadoCensura = await comentarioController.censurarComentario(texto);
-
+      
       console.log('');
       console.log('╔════════════════════════════════════════╗');
       console.log('║  ✅ CENSURA COMPLETADA                 ║');
@@ -85,11 +255,11 @@ const comentarioController = {
       console.log('   Texto CENSURADO:', resultadoCensura.texto_censurado);
       console.log('   ¿Son iguales?  :', texto === resultadoCensura.texto_censurado);
       console.log('');
-
+      
       const textoFinal = resultadoCensura.texto_censurado;
       console.log('💾 Texto que se guardará en BD:', textoFinal);
       console.log('');
-
+      
       // Guardar
       console.log('💾 Guardando comentario en BD...');
       const comentarioId = await Comentario.crear(publicacion_id, usuario_id, textoFinal);
@@ -105,7 +275,7 @@ const comentarioController = {
       const comentario = await Comentario.obtenerPorId(comentarioId);
       console.log('📊 Comentario obtenido:', JSON.stringify(comentario, null, 2));
       console.log('');
-
+      
       console.log('╔════════════════════════════════════════╗');
       console.log('║  📤 ENVIANDO RESPUESTA AL CLIENTE      ║');
       console.log('╚════════════════════════════════════════╝');
@@ -120,14 +290,6 @@ const comentarioController = {
       };
       console.log('Respuesta completa:', JSON.stringify(respuesta, null, 2));
       console.log('');
-
-      // Emitir evento por Socket.io
-      try {
-        getIo().emit('new_comment', respuesta);
-        console.log('📡 Evento new_comment emitido para publicación:', publicacion_id);
-      } catch (socketError) {
-        console.error('❌ Error al emitir evento Socket.io:', socketError);
-      }
 
       return successResponse(
         res,
@@ -271,7 +433,7 @@ const comentarioController = {
       console.log('🔍 Censurando texto actualizado...');
       const resultadoCensura = await comentarioController.censurarComentario(texto);
       console.log('✅ Censura completada:', resultadoCensura.metodo);
-
+      
       const textoFinal = resultadoCensura.texto_censurado;
 
       // Actualizar

@@ -1,22 +1,6 @@
 const Documento = require('../models/Documento');
-const fs = require('fs').promises;
-const path = require('path');
+const { deleteFromS3 } = require('../config/aws');
 const { successResponse, errorResponse } = require('../utils/responses');
-
-/**
- * ELIMINAR ARCHIVO DEL SISTEMA LOCAL
- */
-const deleteLocalFile = async (filePath) => {
-  try {
-    if (filePath && filePath.startsWith('/uploads/')) {
-      const fullPath = path.join(__dirname, '..', filePath);
-      await fs.unlink(fullPath);
-      console.log(`🗑️ Archivo eliminado: ${fullPath}`);
-    }
-  } catch (error) {
-    console.error('Error al eliminar archivo:', error);
-  }
-};
 
 /**
  * SUBIR DOCUMENTO
@@ -40,27 +24,22 @@ exports.subirDocumento = async (req, res) => {
       'application/vnd.openxmlformats-officedocument.presentationml.presentation',
       'application/zip',
       'application/x-rar-compressed',
-      'application/x-zip-compressed',
       'text/csv',
       'text/plain'
     ];
 
     if (!tiposPermitidos.includes(req.file.mimetype)) {
-      // Eliminar archivo del sistema local
-      await deleteLocalFile(req.file.path);
+      await deleteFromS3(req.file.location).catch(() => {});
       return errorResponse(res, 'Tipo de archivo no permitido. Solo: PDF, Word, Excel, PowerPoint, ZIP, CSV, TXT', 400);
     }
-
-    // Generar URL relativa para acceso
-    const documento_url = `/uploads/documentos/${req.file.filename}`;
 
     const { icono, color } = Documento.obtenerIconoYColor(req.file.mimetype);
 
     const documentoId = await Documento.crear({
       usuario_id: req.usuario.id,
       publicacion_id: publicacion_id || null,
-      documento_url: documento_url,
-      documento_s3: '', // 🔥 String vacío en lugar de null
+      documento_url: null,
+      documento_s3: req.file.location,
       nombre_archivo: nombre_archivo_custom || req.file.originalname,
       tamano_archivo: req.file.size,
       tipo_archivo: req.file.mimetype,
@@ -72,19 +51,13 @@ exports.subirDocumento = async (req, res) => {
 
     return successResponse(res, documento, 'Documento subido correctamente', 201);
   } catch (error) {
-    console.error('Error al subir documento:', error);
-    // Eliminar archivo si hubo error
     if (req.file) {
-      await deleteLocalFile(req.file.path);
+      await deleteFromS3(req.file.location).catch(() => {});
     }
     return errorResponse(res, 'Error al subir el documento', 500);
   }
 };
 
-/**
- * OBTENER DOCUMENTOS DE UN USUARIO
- * GET /api/documentos/usuario/:usuario_id
- */
 exports.obtenerDocumentosUsuario = async (req, res) => {
   try {
     const { usuario_id } = req.params;
@@ -117,7 +90,6 @@ exports.obtenerMisDocumentos = async (req, res) => {
       documentos.length > 0 ? 'Mis documentos' : 'No tienes documentos'
     );
   } catch (error) {
-    console.error('Error al obtener mis documentos:', error);
     return errorResponse(res, 'Error al obtener los documentos', 500);
   }
 };
@@ -137,7 +109,6 @@ exports.obtenerDocumento = async (req, res) => {
 
     return successResponse(res, documento, 'Documento encontrado');
   } catch (error) {
-    console.error('Error al obtener documento:', error);
     return errorResponse(res, 'Error al obtener el documento', 500);
   }
 };
@@ -157,7 +128,6 @@ exports.obtenerDocumentosPorPublicacion = async (req, res) => {
       `${documentos.length} documento(s) encontrado(s)`
     );
   } catch (error) {
-    console.error('Error al obtener documentos de publicación:', error);
     return errorResponse(res, 'Error al obtener documentos de la publicación', 500);
   }
 };
@@ -174,7 +144,7 @@ exports.actualizarDocumento = async (req, res) => {
     const documento = await Documento.obtenerPorId(id);
     if (!documento || documento.usuario_id !== req.usuario.id) {
       if (req.file) {
-        await deleteLocalFile(req.file.path);
+        await deleteFromS3(req.file.location).catch(() => {});
       }
       return errorResponse(res, 'Documento no encontrado o no autorizado', 404);
     }
@@ -182,22 +152,17 @@ exports.actualizarDocumento = async (req, res) => {
     let datosActualizar = {};
     
     if (req.file) {
-      // Eliminar archivo anterior
-      if (documento.documento_url) {
-        await deleteLocalFile(documento.documento_url);
+      if (documento.documento_s3) {
+        await deleteFromS3(documento.documento_s3).catch(() => {});
       }
 
-      // Nuevo archivo
-      datosActualizar.documento_url = `/uploads/documentos/${req.file.filename}`;
+      datosActualizar.documento_s3 = req.file.location;
       datosActualizar.nombre_archivo = nombre_archivo_custom || req.file.originalname;
-      datosActualizar.tamano_archivo = req.file.size;
-      datosActualizar.tipo_archivo = req.file.mimetype;
 
       const { icono: nuevoIcono, color: nuevoColor } = Documento.obtenerIconoYColor(req.file.mimetype);
       datosActualizar.icono = nuevoIcono;
       datosActualizar.color = nuevoColor;
     } else {
-      // Solo actualizar metadatos
       if (nombre_archivo_custom) datosActualizar.nombre_archivo = nombre_archivo_custom;
       if (icono) datosActualizar.icono = icono;
       if (color) datosActualizar.color = color;
@@ -208,7 +173,7 @@ exports.actualizarDocumento = async (req, res) => {
 
     if (!actualizado) {
       if (req.file) {
-        await deleteLocalFile(req.file.path);
+        await deleteFromS3(req.file.location).catch(() => {});
       }
       return errorResponse(res, 'No se pudo actualizar el documento', 400);
     }
@@ -217,9 +182,8 @@ exports.actualizarDocumento = async (req, res) => {
 
     return successResponse(res, documentoActualizado, 'Documento actualizado correctamente');
   } catch (error) {
-    console.error('Error al actualizar documento:', error);
     if (req.file) {
-      await deleteLocalFile(req.file.path);
+      await deleteFromS3(req.file.location).catch(() => {});
     }
     return errorResponse(res, 'Error al actualizar el documento', 500);
   }
@@ -255,7 +219,6 @@ exports.vincularDocumentoAPublicacion = async (req, res) => {
 
     return successResponse(res, documentoActualizado, 'Documento vinculado a publicación');
   } catch (error) {
-    console.error('Error al vincular documento:', error);
     return errorResponse(res, 'Error al vincular documento', 500);
   }
 };
@@ -283,7 +246,6 @@ exports.desvincularDocumento = async (req, res) => {
 
     return successResponse(res, documentoActualizado, 'Documento desvinculado de publicación');
   } catch (error) {
-    console.error('Error al desvincular documento:', error);
     return errorResponse(res, 'Error al desvincular documento', 500);
   }
 };
@@ -301,9 +263,8 @@ exports.eliminarDocumento = async (req, res) => {
       return errorResponse(res, 'Documento no encontrado o no autorizado', 404);
     }
 
-    // Eliminar archivo del sistema
-    if (documento.documento_url) {
-      await deleteLocalFile(documento.documento_url);
+    if (documento.documento_s3) {
+      await deleteFromS3(documento.documento_s3).catch(() => {});
     }
 
     const eliminado = await Documento.eliminar(id, req.usuario.id);
@@ -314,7 +275,6 @@ exports.eliminarDocumento = async (req, res) => {
 
     return successResponse(res, { deleted: true }, 'Documento eliminado correctamente');
   } catch (error) {
-    console.error('Error al eliminar documento:', error);
     return errorResponse(res, 'Error al eliminar el documento', 500);
   }
 };
@@ -329,7 +289,6 @@ exports.obtenerTodosDocumentos = async (req, res) => {
 
     return successResponse(res, documentos, 'Lista de documentos');
   } catch (error) {
-    console.error('Error al obtener todos los documentos:', error);
     return errorResponse(res, 'Error al obtener los documentos', 500);
   }
 };

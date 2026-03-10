@@ -1,10 +1,7 @@
-// =============================================================================
-// src/controllers/usuariosController.js - SIN AWS S3
-// =============================================================================
-
+// src/controllers/usuariosController.js
 const Usuario = require('../models/Usuario');
 const { successResponse, errorResponse } = require('../utils/responses');
-const { deleteLocalFile, getRelativeUrl } = require('../utils/fileUtils');
+const { deleteFromS3 } = require('../config/aws');
 
 // ==================== OBTENER MI PERFIL (USUARIO AUTENTICADO) ====================
 exports.obtenerMiPerfil = async (req, res) => {
@@ -72,38 +69,41 @@ exports.actualizarPerfil = async (req, res) => {
     if (ubicacion !== undefined) datosActualizar.ubicacion = ubicacion;
     if (carrera !== undefined) datosActualizar.carrera = carrera;
 
-    // Obtener usuario anterior para eliminar fotos antiguas si es necesario
+    // Obtener usuario anterior para comparar / eliminar si procede
     const usuarioAnterior = await Usuario.buscarPorId(usuarioId);
 
-    // ========== MANEJAR FOTO DE PERFIL (LOCAL) ==========
+    // Manejar foto de perfil
     if (req.files && req.files.foto_perfil && req.files.foto_perfil.length > 0) {
       const fotoPerfil = req.files.foto_perfil[0];
+      datosActualizar.foto_perfil_url = fotoPerfil.location;
+      datosActualizar.foto_perfil_s3 = fotoPerfil.key;
 
-      datosActualizar.foto_perfil_url = getRelativeUrl(fotoPerfil.path);
-      datosActualizar.foto_perfil_s3 = null; // No se usa S3
-
-      console.log('✅ Foto de perfil guardada localmente:', datosActualizar.foto_perfil_url);
-      console.log('📂 Ruta física:', fotoPerfil.path);
-
-      // Eliminar foto anterior si existe
-      if (usuarioAnterior?.foto_perfil_url) {
-        await deleteLocalFile(usuarioAnterior.foto_perfil_url);
+      console.log('✅ Foto de perfil guardada en S3:', fotoPerfil.location, fotoPerfil.key);
+      // Eliminar anterior solo si existe y es distinta a la nueva
+      try {
+        if (usuarioAnterior?.foto_perfil_s3 && usuarioAnterior.foto_perfil_s3 !== datosActualizar.foto_perfil_s3) {
+          await deleteFromS3(usuarioAnterior.foto_perfil_s3);
+          console.log('🗑️ Foto de perfil anterior eliminada de S3');
+        }
+      } catch (err) {
+        console.warn('⚠️ No se pudo eliminar foto de perfil anterior:', err.message || err);
       }
     }
 
-    // ========== MANEJAR FOTO DE PORTADA (LOCAL) ==========
+    // Manejar foto de portada
     if (req.files && req.files.foto_portada && req.files.foto_portada.length > 0) {
       const fotoPortada = req.files.foto_portada[0];
+      datosActualizar.foto_portada_url = fotoPortada.location;
+      datosActualizar.foto_portada_s3 = fotoPortada.key;
 
-      datosActualizar.foto_portada_url = getRelativeUrl(fotoPortada.path);
-      datosActualizar.foto_portada_s3 = null; // No se usa S3
-
-      console.log('✅ Foto de portada guardada localmente:', datosActualizar.foto_portada_url);
-      console.log('📂 Ruta física:', fotoPortada.path);
-
-      // Eliminar foto anterior si existe
-      if (usuarioAnterior?.foto_portada_url) {
-        await deleteLocalFile(usuarioAnterior.foto_portada_url);
+      console.log('✅ Foto de portada guardada en S3:', fotoPortada.location, fotoPortada.key);
+      try {
+        if (usuarioAnterior?.foto_portada_s3 && usuarioAnterior.foto_portada_s3 !== datosActualizar.foto_portada_s3) {
+          await deleteFromS3(usuarioAnterior.foto_portada_s3);
+          console.log('🗑️ Foto de portada anterior eliminada de S3');
+        }
+      } catch (err) {
+        console.warn('⚠️ No se pudo eliminar foto de portada anterior:', err.message || err);
       }
     }
 
@@ -115,10 +115,14 @@ exports.actualizarPerfil = async (req, res) => {
 
     const actualizado = await Usuario.actualizar(usuarioId, datosActualizar);
     if (!actualizado) {
-      // Limpiar archivos subidos si hay fallo
+      // limpiar archivos subidos si hay fallo
       if (req.files) {
-        if (req.files.foto_perfil) await deleteLocalFile(req.files.foto_perfil[0].path);
-        if (req.files.foto_portada) await deleteLocalFile(req.files.foto_portada[0].path);
+        try {
+          if (req.files.foto_perfil) await deleteFromS3(req.files.foto_perfil[0].key);
+        } catch (e) { console.error('Error limpiando foto_perfil:', e); }
+        try {
+          if (req.files.foto_portada) await deleteFromS3(req.files.foto_portada[0].key);
+        } catch (e) { console.error('Error limpiando foto_portada:', e); }
       }
       return errorResponse(res, 'No se pudo actualizar el perfil', 400);
     }
@@ -139,10 +143,14 @@ exports.actualizarPerfil = async (req, res) => {
     console.error('❌ Error al actualizar perfil:', error);
     console.error('Stack:', error.stack);
 
-    // Eliminar archivos subidos si hay error
+    // Eliminar archivos subidos a S3 si hay error
     if (req.files) {
-      if (req.files.foto_perfil) await deleteLocalFile(req.files.foto_perfil[0].path);
-      if (req.files.foto_portada) await deleteLocalFile(req.files.foto_portada[0].path);
+      try {
+        if (req.files.foto_perfil) await deleteFromS3(req.files.foto_perfil[0].key);
+      } catch (e) { console.error('Error al limpiar foto de perfil:', e); }
+      try {
+        if (req.files.foto_portada) await deleteFromS3(req.files.foto_portada[0].key);
+      } catch (e) { console.error('Error al limpiar foto de portada:', e); }
     }
 
     return errorResponse(res, 'Error al actualizar perfil', 500);
@@ -175,9 +183,14 @@ exports.eliminarCuenta = async (req, res) => {
     const usuario = await Usuario.buscarPorId(usuarioId);
 
     if (usuario) {
-      // Eliminar foto de perfil
-      if (usuario.foto_perfil_url) await deleteLocalFile(usuario.foto_perfil_url);
-      if (usuario.foto_portada_url) await deleteLocalFile(usuario.foto_portada_url);
+      if (usuario.foto_perfil_s3) {
+        try { await deleteFromS3(usuario.foto_perfil_s3); console.log('✅ Foto de perfil eliminada de S3'); }
+        catch (e) { console.error('Error al eliminar foto de perfil:', e); }
+      }
+      if (usuario.foto_portada_s3) {
+        try { await deleteFromS3(usuario.foto_portada_s3); console.log('✅ Foto de portada eliminada de S3'); }
+        catch (e) { console.error('Error al eliminar foto de portada:', e); }
+      }
     }
 
     const eliminado = await Usuario.eliminar(usuarioId);
@@ -191,13 +204,13 @@ exports.eliminarCuenta = async (req, res) => {
   }
 };
 
-// ==================== RUTAS DE ACTIVIDAD ====================
 
 exports.actualizarActividad = async (req, res) => {
   try {
     const usuarioId = req.usuario.id;
     const { activo } = req.body;
 
+    // Validar que activo sea 0 o 1
     if (activo !== 0 && activo !== 1) {
       return res.status(400).json({
         success: false,
@@ -212,6 +225,7 @@ exports.actualizarActividad = async (req, res) => {
       mensaje: `Estado actualizado a ${activo === 1 ? 'activo' : 'inactivo'}`,
       data: { activo }
     });
+
   } catch (error) {
     console.error('❌ Error en actualizarActividad:', error);
     res.status(500).json({
@@ -221,19 +235,22 @@ exports.actualizarActividad = async (req, res) => {
   }
 };
 
+// POST /api/usuarios/me/heartbeat
 exports.heartbeat = async (req, res) => {
   try {
     const usuarioId = req.usuario.id;
+
     await Usuario.registrarHeartbeat(usuarioId);
 
     res.json({
       success: true,
       mensaje: 'Heartbeat recibido',
-      data: {
+      data: { 
         activo: 1,
         timestamp: new Date()
       }
     });
+
   } catch (error) {
     console.error('❌ Error en heartbeat:', error);
     res.status(500).json({
@@ -243,6 +260,7 @@ exports.heartbeat = async (req, res) => {
   }
 };
 
+// GET /api/usuarios/activos
 exports.obtenerUsuariosActivos = async (req, res) => {
   try {
     const usuarios = await Usuario.obtenerActivos();
@@ -252,6 +270,7 @@ exports.obtenerUsuariosActivos = async (req, res) => {
       mensaje: 'Usuarios activos obtenidos',
       data: usuarios
     });
+
   } catch (error) {
     console.error('❌ Error en obtenerUsuariosActivos:', error);
     res.status(500).json({
@@ -264,7 +283,7 @@ exports.obtenerUsuariosActivos = async (req, res) => {
 exports.obtenerSeguidoresActivos = async (req, res) => {
   try {
     const usuarioId = req.usuario.id;
-
+    
     console.log('🎯 [CONTROLLER] obtenerSeguidoresActivos iniciado');
     console.log('👤 [CONTROLLER] Usuario autenticado:', {
       id: usuarioId,
@@ -284,6 +303,7 @@ exports.obtenerSeguidoresActivos = async (req, res) => {
       mensaje: `${seguidores.length} seguidores activos encontrados`,
       data: seguidores
     });
+
   } catch (error) {
     console.error('❌ [CONTROLLER] Error en obtenerSeguidoresActivos:', error);
     console.error('❌ [CONTROLLER] Stack:', error.stack);

@@ -1,7 +1,6 @@
 const Like = require('../models/likes');
 const Notificacion = require('../models/Notificacion');
 const { successResponse, errorResponse } = require('../utils/responses');
-const { getIo } = require('../config/socket');
 
 /**
  * ============================================
@@ -42,14 +41,6 @@ const likeController = {
 
       console.log(`❤️ Usuario ${usuario_id} dio like a publicación ${publicacion_id}`);
 
-      // Emitir actualización de likes
-      try {
-        const totalLikes = await Like.obtenerTotal(publicacion_id);
-        getIo().emit('like_update', { publicacion_id, total: totalLikes });
-      } catch (ioErr) {
-        console.error('❌ Error socket:', ioErr);
-      }
-
       return successResponse(res, null, 'Like agregado correctamente', 201);
     } catch (error) {
       console.error('❌ Error en agregarLike:', error);
@@ -86,14 +77,6 @@ const likeController = {
 
       console.log(`💔 Usuario ${usuario_id} quitó like de publicación ${publicacion_id}`);
 
-      // Emitir actualización de likes
-      try {
-        const totalLikes = await Like.obtenerTotal(publicacion_id);
-        getIo().emit('like_update', { publicacion_id, total: totalLikes });
-      } catch (ioErr) {
-        console.error('❌ Error socket:', ioErr);
-      }
-
       return successResponse(res, null, 'Like eliminado correctamente', 200);
     } catch (error) {
       console.error('❌ Error en eliminarLike:', error);
@@ -124,30 +107,18 @@ const likeController = {
         await Like.eliminar(publicacion_id, usuario_id);
         await Like.decrementarTotalPublicacion(publicacion_id);
         await Notificacion.eliminarNotificacionLike(publicacion_id, usuario_id);
-
+        
         console.log(`💔 Usuario ${usuario_id} quitó like de publicación ${publicacion_id}`);
-
-        // Emitir actualización
-        try {
-          const totalLikes = await Like.obtenerTotal(publicacion_id);
-          getIo().emit('like_update', { publicacion_id, total: totalLikes, liked: false, usuario_id });
-        } catch (ioErr) { }
-
+        
         return successResponse(res, { liked: false }, 'Like eliminado', 200);
       } else {
         // AGREGAR LIKE
         await Like.crear(publicacion_id, usuario_id);
         await Like.incrementarTotalPublicacion(publicacion_id);
         await Notificacion.crearNotificacionLike(publicacion_id, usuario_id);
-
+        
         console.log(`❤️ Usuario ${usuario_id} dio like a publicación ${publicacion_id}`);
-
-        // Emitir actualización
-        try {
-          const totalLikes = await Like.obtenerTotal(publicacion_id);
-          getIo().emit('like_update', { publicacion_id, total: totalLikes, liked: true, usuario_id });
-        } catch (ioErr) { }
-
+        
         return successResponse(res, { liked: true }, 'Like agregado', 201);
       }
     } catch (error) {

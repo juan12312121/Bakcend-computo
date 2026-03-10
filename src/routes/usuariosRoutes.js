@@ -1,6 +1,4 @@
-// =============================================================================
-// routes/usuarios.js - SOLO ALMACENAMIENTO LOCAL
-// =============================================================================
+// routes/usuarios.js - Archivo completo actualizado
 
 const express = require('express');
 const router = express.Router();
@@ -9,20 +7,26 @@ const { proteger } = require('../middlewares/auth');
 const { validarActualizarPerfil } = require('../utils/validators');
 const { validarResultado } = require('../middlewares/validation');
 
-// ✅ USAR SOLO MULTER LOCAL
-const { upload } = require('../config/multer');
-
-console.log('📁 Rutas de usuarios configuradas con almacenamiento LOCAL');
+// Configuración de upload
+let upload;
+try {
+  const awsConfig = require('../config/aws');
+  if (awsConfig && awsConfig.upload) {
+    console.log('✅ Usando almacenamiento en AWS S3');
+    upload = awsConfig.upload;
+  } else {
+    throw new Error('Falta configuración de AWS');
+  }
+} catch (err) {
+  console.warn('⚠️ AWS S3 no disponible, usando almacenamiento local');
+  const multerConfig = require('../config/multer');
+  upload = multerConfig.upload;
+}
 
 // ================= RUTAS DE PERFIL =================
-
-// GET /api/usuarios/me - Obtener mi perfil
 router.get('/me', proteger, usuariosController.obtenerMiPerfil);
-
-// GET /api/usuarios/buscar?q=nombre - Buscar usuarios
 router.get('/buscar', proteger, usuariosController.buscarUsuarios);
 
-// PUT /api/usuarios/me - Actualizar perfil con fotos
 router.put(
   '/me',
   proteger,
@@ -35,7 +39,6 @@ router.put(
   usuariosController.actualizarPerfil
 );
 
-// DELETE /api/usuarios/me - Eliminar cuenta
 router.delete('/me', proteger, usuariosController.eliminarCuenta);
 
 // ================= RUTAS DE ACTIVIDAD =================
@@ -46,7 +49,7 @@ router.put('/me/actividad', proteger, usuariosController.actualizarActividad);
 // POST /api/usuarios/me/heartbeat - Enviar heartbeat para mantener activo
 router.post('/me/heartbeat', proteger, usuariosController.heartbeat);
 
-// GET /api/usuarios/me/seguidores/activos - Obtener MIS seguidores activos
+// 👉 GET /api/usuarios/me/seguidores/activos - Obtener MIS seguidores activos
 router.get('/me/seguidores/activos', proteger, usuariosController.obtenerSeguidoresActivos);
 
 // GET /api/usuarios/activos - Obtener todos los usuarios activos (general)

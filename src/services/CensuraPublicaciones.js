@@ -1,147 +1,261 @@
-/**
- * ============================================
- * SERVICIO DE CENSURA - VERSIÓN CON IA (GEMINI)
- * ============================================
- */
-
-const { GoogleGenerativeAI } = require('@google/generative-ai');
-const fs = require('fs');
-
-// Inicializar Gemini
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const {
+  obtenerModelo,
+  ejecutarConReintentos,
+  extraerJSON,
+  formatearPrompt,
+  CONFIG_VALIDACION,
+  CONFIG_IMAGEN,
+  TIMEOUTS,
+  PROMPTS,
+} = require('../config/gemini');
 
 class CensuraPublicaciones {
-
+  
   /**
-   * 🔍 Validar contenido de texto
+   * Validar contenido de texto con Gemini
+   * @param {string} contenido - Texto a validar
+   * @param {string} categoria - Categoría de la publicación
+   * @returns {Promise<object>}
    */
   static async validarContenido(contenido, categoria = 'General') {
-    if (!process.env.GEMINI_API_KEY) {
-      console.warn('⚠️ GEMINI_API_KEY no configurada. Saltando censura.');
-      return this.fallbackAprobar();
-    }
-
     try {
-      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+      console.log('🔍 Iniciando validación de contenido...');
+      
+      const modelo = obtenerModelo('FLASH');
+      const prompt = formatearPrompt(PROMPTS.VALIDACION_CONTENIDO, {
+        categoria,
+        contenido: contenido.substring(0, 1000),
+      });
 
-      const prompt = `
-        Analiza el siguiente contenido para una red social estudiantil.
-        Categoría: ${categoria}
-        Contenido: "${contenido}"
-        
-        Responde estrictamente en formato JSON con la siguiente estructura:
-        {
-          "valido": boolean,
-          "apropiado": boolean,
-          "accion": "aprobar" | "rechazar" | "moderar",
-          "razon": "string breve en español",
-          "problemas": ["lista de problemas si los hay"]
-        }
-        
-        Criterios de rechazo: Odio, violencia explícita, acoso, contenido sexual, spam o contenido ilegal.
-      `;
+      const resultado = await ejecutarConReintentos(async () => {
+        const result = await Promise.race([
+          modelo.generateContent({
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            generationConfig: CONFIG_VALIDACION,
+          }),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Timeout en validación')), TIMEOUTS.VALIDACION)
+          ),
+        ]);
+        return result;
+      });
 
-      const result = await model.generateContent(prompt);
-      const response = await result.response;
-      let text = response.text();
+      const responseText = resultado.response.text();
+      const analisis = extraerJSON(responseText);
 
-      // Limpiar markdown del JSON si existe
-      text = text.replace(/```json|```/g, '').trim();
+      console.log(`✅ Validación completada - Aprobado: ${analisis.aprobado}`);
 
-      const analysis = JSON.parse(text);
       return {
-        ...analysis,
-        confianza: 100,
-        metodo: 'gemini-ai'
+        valido: analisis.aprobado,
+        razon: analisis.razon || 'Contenido aprobado',
+        confianza: analisis.confianza || 0,
+        problemas: analisis.categorias_detectadas || [],
+        accion: analisis.accion_recomendada || 'publico',
+        timestamp: new Date(),
       };
+
     } catch (error) {
-      console.error('❌ Error en censura de texto (Gemini):', error);
-      return this.fallbackAprobar('Error en validación AI');
+      console.error('❌ Error en validación de contenido:', error.message);
+      
+      return {
+        valido: true,
+        razon: `Error en validación (${error.message}) - contenido permitido por defecto`,
+        confianza: 0,
+        problemas: [],
+        accion: 'error',
+        timestamp: new Date(),
+        error: error.message,
+      };
     }
   }
 
   /**
-   * 🖼️ Validar imagen
+   * Validar imagen con Gemini
+   * @param {string} imagenUrl - URL de la imagen en S3
+   * @param {string} contenidoRelacionado - Contenido de la publicación
+   * @returns {Promise<object>}
    */
-  static async validarImagenDescripcion(imagenPath, contenidoRelacionado = '') {
-    if (!process.env.GEMINI_API_KEY) return this.fallbackAprobar();
-    if (!fs.existsSync(imagenPath)) return this.fallbackAprobar('Imagen no encontrada');
-
+  static async validarImagenDescripcion(imagenUrl, contenidoRelacionado = '') {
     try {
-      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+      console.log('🖼️ Iniciando validación de imagen...');
+      
+      const modelo = obtenerModelo('VISION');
+      const prompt = formatearPrompt(PROMPTS.VALIDACION_IMAGEN, {
+        contenido: contenidoRelacionado.substring(0, 500),
+      });
 
-      const imageParts = [
-        {
-          inlineData: {
-            data: Buffer.from(fs.readFileSync(imagenPath)).toString("base64"),
-            mimeType: "image/jpeg",
-          },
-        },
-      ];
+      const imagenBase64 = await this.obtenerImagenBase64(imagenUrl);
 
-      const prompt = `
-        Analiza esta imagen y su descripción: "${contenidoRelacionado}"
-        ¿Es apropiada para una red social universitaria?
-        Busca: Desnudez, violencia, drogas, armas o contenido ofensivo.
-        
-        Responde estrictamente en formato JSON:
-        {
-          "apropiada": boolean,
-          "accion": "aprobar" | "rechazar",
-          "razon": "string breve en español",
-          "problemas": []
-        }
-      `;
+      const resultado = await ejecutarConReintentos(async () => {
+        const result = await Promise.race([
+          modelo.generateContent({
+            contents: [
+              {
+                role: 'user',
+                parts: [
+                  {
+                    inlineData: {
+                      mimeType: 'image/jpeg',
+                      data: imagenBase64,
+                    },
+                  },
+                  { text: prompt },
+                ],
+              },
+            ],
+            generationConfig: CONFIG_IMAGEN,
+          }),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Timeout en validación de imagen')), TIMEOUTS.IMAGEN)
+          ),
+        ]);
+        return result;
+      });
 
-      const result = await model.generateContent([prompt, ...imageParts]);
-      const response = await result.response;
-      let text = response.text();
+      const responseText = resultado.response.text();
+      const analisis = extraerJSON(responseText);
 
-      text = text.replace(/```json|```/g, '').trim();
+      console.log(`✅ Validación de imagen completada - Apropiada: ${analisis.apropiada}`);
 
-      const analysis = JSON.parse(text);
       return {
-        ...analysis,
-        valido: analysis.apropiada,
-        confianza: 100,
-        metodo: 'gemini-vision'
+        apropiada: analisis.apropiada,
+        razon: analisis.razon || 'Imagen aprobada',
+        confianza: analisis.confianza || 0,
+        problemas: analisis.problemas || [],
+        accion: analisis.accion || 'publico',
+        timestamp: new Date(),
       };
+
     } catch (error) {
-      console.error('❌ Error en censura de imagen (Gemini):', error);
-      return this.fallbackAprobar('Error en validación AI (Imagen)');
+      console.error('❌ Error validando imagen:', error.message);
+      
+      return {
+        apropiada: true,
+        razon: `Error en validación de imagen (${error.message})`,
+        confianza: 0,
+        problemas: [],
+        accion: 'error',
+        timestamp: new Date(),
+        error: error.message,
+      };
     }
   }
 
   /**
-   * 📋 Generar reporte completo
+   * Convertir URL de imagen a base64
+   * @param {string} url - URL de la imagen
+   * @returns {Promise<string>}
+   */
+  static async obtenerImagenBase64(url) {
+    try {
+      const fetch = (await import('node-fetch')).default;
+      const response = await fetch(url);
+      const buffer = await response.buffer();
+      return buffer.toString('base64');
+    } catch (error) {
+      console.error('❌ Error obteniendo imagen:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Generar reporte completo de análisis
+   * @param {number} publicacionId - ID de la publicación
+   * @param {number} userId - ID del usuario
+   * @param {object} analisisContenido - Resultado de validación de contenido
+   * @param {object} analisisImagen - Resultado de validación de imagen
+   * @returns {object} Reporte completo
    */
   static async generarReporte(publicacionId, userId, analisisContenido, analisisImagen = null) {
-    const esApropiado = analisisContenido.apropiado && (!analisisImagen || analisisImagen.apropiada);
-
-    return {
+    const reporte = {
       publicacionId,
       userId,
       fecha: new Date().toISOString(),
-      contenido: analisisContenido,
-      imagen: analisisImagen,
-      estadoFinal: {
-        estado: esApropiado ? 'APROBADO' : 'RECHAZADO',
-        razon: esApropiado ? 'Aprobado por IA' : 'Rechazado por incumplir políticas',
-        nivel: esApropiado ? 'bajo' : 'alto',
-        confianza: 100
-      }
+      contenido: {
+        valido: analisisContenido.valido,
+        razon: analisisContenido.razon,
+        confianza: analisisContenido.confianza,
+        problemas: analisisContenido.problemas,
+        accion: analisisContenido.accion,
+      },
+      imagen: analisisImagen
+        ? {
+            apropiada: analisisImagen.apropiada,
+            razon: analisisImagen.razon,
+            confianza: analisisImagen.confianza,
+            accion: analisisImagen.accion,
+          }
+        : null,
+      estadoFinal: this.determinarEstadoFinal(analisisContenido, analisisImagen),
     };
+
+    console.log('📋 Reporte generado:', reporte.estadoFinal.estado);
+    return reporte;
   }
 
-  static fallbackAprobar(razon = 'Aprobado (Fallback)') {
+  /**
+   * Determinar el estado final de la publicación
+   * @param {object} analisisContenido - Análisis del contenido
+   * @param {object} analisisImagen - Análisis de la imagen
+   * @returns {object} Estado final
+   */
+  static determinarEstadoFinal(analisisContenido, analisisImagen) {
+    // Si hay error en Gemini, permitir por defecto
+    if (analisisContenido.accion === 'error' || analisisImagen?.accion === 'error') {
+      return {
+        estado: 'APROBADO',
+        razon: 'Validación con error - contenido permitido',
+        nivel: 'bajo',
+        confianza: 'baja',
+      };
+    }
+
+    // Si el contenido no es válido
+    if (!analisisContenido.valido || analisisContenido.accion === 'rechazar') {
+      return {
+        estado: 'RECHAZADO',
+        razon: analisisContenido.razon,
+        nivel: 'alto',
+        confianza: `${analisisContenido.confianza}%`,
+      };
+    }
+
+    // Si la imagen no es apropiada
+    if (analisisImagen && (!analisisImagen.apropiada || analisisImagen.accion === 'rechazar')) {
+      return {
+        estado: 'RECHAZADO',
+        razon: analisisImagen.razon,
+        nivel: 'alto',
+        confianza: `${analisisImagen.confianza}%`,
+      };
+    }
+
+    // Si hay baja confianza o requiere revisión
+    if (
+      analisisContenido.confianza < 70 ||
+      analisisContenido.accion === 'requiere_revision' ||
+      (analisisImagen && analisisImagen.confianza < 70)
+    ) {
+      return {
+        estado: 'REQUIERE_REVISION',
+        razon: 'Moderador humano debe revisar (baja confianza)',
+        nivel: 'medio',
+        confianza: Math.min(
+          analisisContenido.confianza,
+          analisisImagen?.confianza || 100
+        ),
+      };
+    }
+
+    // Aprobado
     return {
-      valido: true,
-      apropiado: true,
-      accion: 'aprobar',
-      razon,
-      confianza: 0,
-      problemas: [],
-      metodo: 'local-fallback'
+      estado: 'APROBADO',
+      razon: 'Contenido e imagen apropiados',
+      nivel: 'bajo',
+      confianza: Math.min(
+        analisisContenido.confianza,
+        analisisImagen?.confianza || 100
+      ),
     };
   }
 }

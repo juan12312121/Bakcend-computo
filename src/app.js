@@ -1,32 +1,31 @@
-// src/app.js
-
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const compression = require('compression');
 const cookieParser = require('cookie-parser');
-const hpp = require('hpp');
-const rateLimit = require('express-rate-limit');
 const path = require('path');
 const fs = require('fs');
 
 const routes = require('./routes');
 const errorHandler = require('./middlewares/errorHandler');
 const db = require('./config/database');
+const { s3 } = require('./config/aws');
+const { genAI } = require('./config/gemini');
+
+// 🆕 Importar SSE y modelo de Notificaciones
 const { enviarEventoSSE } = require('./routes/notificacionesRoutes');
 const Notificacion = require('./models/Notificacion');
 
 const app = express();
 
-// Crear carpetas locales
+// Crear carpetas locales (respaldo opcional)
 const uploadsDir = path.join(__dirname, 'uploads');
 const perfilesDir = path.join(uploadsDir, 'perfiles');
 const portadasDir = path.join(uploadsDir, 'portadas');
 const publicacionesDir = path.join(uploadsDir, 'publicaciones');
-const historiasDir = path.join(uploadsDir, 'historias'); // 🆕 Para historias
 
-[uploadsDir, perfilesDir, portadasDir, publicacionesDir, historiasDir].forEach(dir => {
+[uploadsDir, perfilesDir, portadasDir, publicacionesDir].forEach(dir => {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
     console.log(`📁 Carpeta local creada: ${dir}`);
@@ -41,61 +40,32 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false
 }));
 
-// 🔥 CORS MEJORADO
-const allowedOrigins = [
-  process.env.FRONTEND_URL || 'http://localhost:4200',
-  'http://localhost:8100',
-  'http://localhost:8080',
-  'http://localhost',
-];
-
 app.use(cors({
   origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin) || process.env.NODE_ENV === 'development') {
-      callback(null, true);
-    } else {
-      console.log('⚠️ Origen rechazado:', origin);
-      callback(new Error('No permitido por CORS'));
-    }
+    callback(null, true); // acepta cualquier origen
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  maxAge: 86400
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'Cache-Control',
+    'X-Requested-With',
+    'Accept'
+  ],
+  exposedHeaders: [
+    'Content-Type',
+    'Cache-Control'
+  ]
 }));
 
 app.use(compression());
-app.use(express.json({ limit: '10kb' }));
-app.use(express.urlencoded({ extended: true, limit: '10kb' }));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 app.use(morgan('dev'));
 
-// 🛡️ SEGURIDAD ADICIONAL
-app.use(hpp());
-
-// 🚦 RATE LIMITING (Relajado para desarrollo)
-const limiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minuto
-  max: 20000, // Prácticamente sin límite para dev
-  message: { success: false, mensaje: 'Demasiadas peticiones, intenta más tarde' },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-app.use('/api/', limiter);
-
-// 🚦 RATE LIMITING AGRESIVO PARA AUTH (Relajado para desarrollo)
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 1000, // Máximo 1000 intentos
-  message: { success: false, mensaje: 'Demasiados intentos de acceso, intenta en 15 minutos' }
-});
-app.use('/api/auth/login', authLimiter);
-app.use('/api/auth/registro', authLimiter);
-
-// Servir archivos estáticos
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-
-// Configurar SSE
+// 🆕 CONFIGURAR SSE EN EL MODELO ANTES DE REGISTRAR RUTAS
 console.log('========================================');
 console.log('🔌 Configurando SSE en el modelo de Notificaciones...');
 console.log('========================================');
@@ -110,16 +80,116 @@ try {
 
 console.log('========================================');
 
-// Health check general
+// 🔥 Endpoint para verificar S3
+app.get('/api/s3/health', async (req, res) => {
+  try {
+    const params = {
+      Bucket: process.env.AWS_BUCKET_NAME
+    };
+    
+    await s3.headBucket(params).promise();
+    
+    res.json({
+      success: true,
+      mensaje: '✅ Conexión con S3 exitosa',
+      bucket: process.env.AWS_BUCKET_NAME,
+      region: process.env.AWS_REGION,
+      url: process.env.AWS_S3_URL
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      mensaje: '❌ Error al conectar con S3',
+      error: error.message,
+      bucket: process.env.AWS_BUCKET_NAME
+    });
+  }
+});
+
+// 🤖 Endpoint para verificar GEMINI
+app.get('/api/gemini/health', async (req, res) => {
+  try {
+    console.log('🤖 Verificando conexión con Gemini...');
+    
+    // Obtener modelo
+    const modelo = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    
+    // Hacer una solicitud de prueba simple
+    const resultado = await modelo.generateContent({
+      contents: [{ 
+        role: 'user', 
+        parts: [{ text: 'Responde solo con "OK"' }] 
+      }],
+      generationConfig: {
+        temperature: 0.1,
+        maxOutputTokens: 10
+      }
+    });
+    
+    const respuesta = resultado.response.text();
+    
+    res.json({
+      success: true,
+      mensaje: '✅ Conexión con Gemini exitosa',
+      modelo: 'gemini-1.5-flash',
+      respuesta: respuesta.trim(),
+      timestamp: new Date().toISOString(),
+      apiKey: process.env.GEMINI_API_KEY ? '✅ Configurada' : '❌ No configurada'
+    });
+    
+  } catch (error) {
+    console.error('❌ Error en Gemini health check:', error.message);
+    res.status(500).json({
+      success: false,
+      mensaje: '❌ Error al conectar con Gemini',
+      error: error.message,
+      detalles: {
+        modelo: 'gemini-1.5-flash',
+        apiKey: process.env.GEMINI_API_KEY ? '✅ Configurada' : '❌ No configurada',
+        timestamp: new Date().toISOString()
+      }
+    });
+  }
+});
+
+// 🔥 Listar archivos en S3
+app.get('/api/s3/files', async (req, res) => {
+  try {
+    const params = {
+      Bucket: process.env.AWS_BUCKET_NAME
+    };
+    
+    const data = await s3.listObjectsV2(params).promise();
+    
+    const archivos = data.Contents.map(file => ({
+      nombre: file.Key,
+      tamaño: file.Size,
+      fecha: file.LastModified,
+      url: `${process.env.AWS_S3_URL}/${file.Key}`
+    }));
+    
+    res.json({
+      success: true,
+      total: archivos.length,
+      archivos: archivos
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Debug de archivos locales
 app.get('/debug/uploads', (req, res) => {
   try {
     const uploadsExists = fs.existsSync(uploadsDir);
     const perfilesExists = fs.existsSync(perfilesDir);
-
+    
     let archivosPerfiles = [];
     let archivosPublicaciones = [];
-    let archivosHistorias = [];
-
+    
     if (perfilesExists) {
       archivosPerfiles = fs.readdirSync(perfilesDir).map(file => ({
         nombre: file,
@@ -127,7 +197,7 @@ app.get('/debug/uploads', (req, res) => {
         tamaño: fs.statSync(path.join(perfilesDir, file)).size
       }));
     }
-
+    
     if (fs.existsSync(publicacionesDir)) {
       archivosPublicaciones = fs.readdirSync(publicacionesDir).map(file => ({
         nombre: file,
@@ -135,17 +205,10 @@ app.get('/debug/uploads', (req, res) => {
         tamaño: fs.statSync(path.join(publicacionesDir, file)).size
       }));
     }
-
-    if (fs.existsSync(historiasDir)) {
-      archivosHistorias = fs.readdirSync(historiasDir).map(file => ({
-        nombre: file,
-        ruta: `/uploads/historias/${file}`,
-        tamaño: fs.statSync(path.join(historiasDir, file)).size
-      }));
-    }
-
+    
     res.json({
       success: true,
+      nota: '⚠️ Archivos locales. S3 es el almacenamiento principal.',
       directorios: {
         perfiles: {
           existe: perfilesExists,
@@ -154,16 +217,11 @@ app.get('/debug/uploads', (req, res) => {
         publicaciones: {
           existe: fs.existsSync(publicacionesDir),
           cantidad: archivosPublicaciones.length
-        },
-        historias: {
-          existe: fs.existsSync(historiasDir),
-          cantidad: archivosHistorias.length
         }
       },
       archivos: {
         perfiles: archivosPerfiles,
-        publicaciones: archivosPublicaciones,
-        historias: archivosHistorias
+        publicaciones: archivosPublicaciones
       }
     });
   } catch (error) {
@@ -174,25 +232,26 @@ app.get('/debug/uploads', (req, res) => {
   }
 });
 
-// Health check general
+// 🔥 Health check general
 app.get('/health', async (req, res) => {
   try {
+    // Verificar BD
     const dbCheck = await db.execute('SELECT 1');
-
+    
     res.json({
       success: true,
-      mensaje: 'API TrinoFlow - Todo funcionando ✅',
+      mensaje: 'API RedStudent - Todo funcionando ✅',
       timestamp: new Date().toISOString(),
       servicios: {
         base_de_datos: '✅ Conectado',
-        sse: '✅ Configurado',
+        s3: '✅ Configurado',
+        gemini: '✅ Configurado',
+        sse: '✅ Configurado', // 🆕
         cors: '✅ Habilitado'
       },
-      red: {
-        ip_local: '192.168.100.70',
-        puerto: process.env.PORT || 3000
-      },
       endpoints_debug: {
+        s3_health: '/api/s3/health',
+        gemini_health: '/api/gemini/health',
         uploads: '/debug/uploads'
       }
     });
@@ -208,19 +267,21 @@ app.get('/health', async (req, res) => {
 // Ruta raíz
 app.get('/', (req, res) => {
   res.json({
-    mensaje: 'API TrinoFlow funcionando correctamente 🚀',
-    version: '3.0.0 - Local Storage + SSE',
-    almacenamiento: 'Local',
-    notificaciones: 'Server-Sent Events (SSE)',
-    plataformas: ['Web'],
+    mensaje: 'API RedStudent funcionando correctamente',
+    version: '2.0.0 - AWS S3 + Gemini + SSE',
+    almacenamiento: 'AWS S3',
+    censura: 'Google Gemini',
+    notificaciones: 'Server-Sent Events (SSE)', // 🆕
     endpoints: {
       health: '/health',
+      s3Health: '/api/s3/health',
+      geminiHealth: '/api/gemini/health',
+      s3Files: '/api/s3/files',
       auth: '/api/auth',
       usuarios: '/api/usuarios',
       publicaciones: '/api/publicaciones',
-      historias: '/api/historias',
       notificaciones: '/api/notificaciones',
-      notificacionesSSE: '/api/notificaciones/stream/:usuarioId'
+      notificacionesSSE: '/api/notificaciones/stream/:usuarioId' // 🆕
     }
   });
 });
@@ -240,4 +301,5 @@ app.use((req, res) => {
   });
 });
 
+// 🔥 NO usar app.listen() aquí - se hace en server.js
 module.exports = app;

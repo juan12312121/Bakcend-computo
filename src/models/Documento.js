@@ -12,8 +12,8 @@ class Documento {
     const [resultado] = await db.execute(query, [
       datos.usuario_id,
       datos.publicacion_id || null,
-      datos.documento_url || '',
-      datos.documento_s3 || '', // 🔥 String vacío en lugar de null
+      datos.documento_url || null,
+      datos.documento_s3 || null,
       datos.nombre_archivo,
       datos.tamano_archivo,
       datos.tipo_archivo,
@@ -93,13 +93,9 @@ class Documento {
       campos.push('nombre_archivo = ?');
       valores.push(datos.nombre_archivo);
     }
-    if (datos.documento_url !== undefined) {
-      campos.push('documento_url = ?');
-      valores.push(datos.documento_url);
-    }
     if (datos.documento_s3 !== undefined) {
       campos.push('documento_s3 = ?');
-      valores.push(datos.documento_s3 || ''); // 🔥 String vacío
+      valores.push(datos.documento_s3);
     }
     if (datos.publicacion_id !== undefined) {
       campos.push('publicacion_id = ?');
@@ -112,14 +108,6 @@ class Documento {
     if (datos.color !== undefined) {
       campos.push('color = ?');
       valores.push(datos.color);
-    }
-    if (datos.tamano_archivo !== undefined) {
-      campos.push('tamano_archivo = ?');
-      valores.push(datos.tamano_archivo);
-    }
-    if (datos.tipo_archivo !== undefined) {
-      campos.push('tipo_archivo = ?');
-      valores.push(datos.tipo_archivo);
     }
 
     if (valores.length === 0) return false;
@@ -181,7 +169,6 @@ class Documento {
       'application/vnd.openxmlformats-officedocument.presentationml.presentation': { icono: 'fa-file-powerpoint', color: 'text-orange-500' },
       'application/zip': { icono: 'fa-file-archive', color: 'text-purple-500' },
       'application/x-rar-compressed': { icono: 'fa-file-archive', color: 'text-purple-500' },
-      'application/x-zip-compressed': { icono: 'fa-file-archive', color: 'text-purple-500' },
       'text/csv': { icono: 'fa-file-csv', color: 'text-yellow-500' },
       'text/plain': { icono: 'fa-file-code', color: 'text-indigo-500' }
     };

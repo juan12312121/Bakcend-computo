@@ -1,45 +1,20 @@
 const dotenv = require('dotenv');
+
+// 🔥 Cargar variables de entorno PRIMERO
 dotenv.config();
 
-const http = require('http');
+// Luego importar la app
 const app = require('./src/app');
-const socketConfig = require('./src/config/socket');
 
 const PORT = process.env.PORT || 3000;
 const HOST = '0.0.0.0';
 
-const server = http.createServer(app);
-
-// Inicializar Socket.io
-const io = socketConfig.init(server);
-
-server.listen(PORT, HOST, () => {
-  console.log('');
-  console.log('========================================');
-  console.log('🚀 SERVIDOR TRINOFLOW INICIADO');
-  console.log('========================================');
+app.listen(PORT, HOST, () => {
+  console.log('🚀 Servidor corriendo en puerto:', PORT);
   console.log('🌐 Host:', HOST);
-  console.log('📡 Puerto:', PORT);
-  console.log('💻 Local: http://localhost:' + PORT);
-  console.log('📱 Red: http://' + HOST + ':' + PORT);
-  console.log('');
-  console.log('🔌 WebSocket: Habilitado (Socket.io)');
+  console.log('☁️  Almacenamiento: AWS S3');
+  console.log('📦 Bucket:', process.env.AWS_BUCKET_NAME);
+  console.log('🌍 Región:', process.env.AWS_REGION);
   console.log('🔧 Entorno:', process.env.NODE_ENV || 'development');
-  console.log('');
-  console.log('🔗 Endpoints disponibles:');
-  console.log('   - API: /api');
-  console.log('   - Health: /health');
-  console.log('========================================');
-  console.log('');
-});
-
-// Manejo graceful de cierre
-process.on('SIGTERM', () => {
-  console.log('👋 Cerrando servidor...');
-  process.exit(0);
-});
-
-process.on('SIGINT', () => {
-  console.log('\n👋 Cerrando servidor...');
-  process.exit(0);
+  console.log('🔗 API disponible en: http://localhost:' + PORT + '/api');
 });
