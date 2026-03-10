@@ -1,20 +1,43 @@
 const dotenv = require('dotenv');
-
-// 🔥 Cargar variables de entorno PRIMERO
 dotenv.config();
 
-// Luego importar la app
+const http = require('http');
+const { Server } = require('socket.io');
 const app = require('./src/app');
 
 const PORT = process.env.PORT || 3000;
 const HOST = '0.0.0.0';
 
-app.listen(PORT, HOST, () => {
+const server = http.createServer(app);
+
+const io = new Server(server, {
+  cors: {
+    origin: '*',
+    methods: ['GET', 'POST']
+  }
+});
+
+io.on('connection', (socket) => {
+  console.log('🔌 Cliente conectado:', socket.id);
+
+  socket.on('join_chat', (chatId) => {
+    socket.join(`chat_${chatId}`);
+  });
+
+  socket.on('leave_chat', (chatId) => {
+    socket.leave(`chat_${chatId}`);
+  });
+
+  socket.on('disconnect', () => {
+    console.log('🔌 Cliente desconectado:', socket.id);
+  });
+});
+
+// Exportar io para usarlo en controladores
+global.io = io;
+
+server.listen(PORT, HOST, () => {
   console.log('🚀 Servidor corriendo en puerto:', PORT);
   console.log('🌐 Host:', HOST);
-  console.log('☁️  Almacenamiento: AWS S3');
-  console.log('📦 Bucket:', process.env.AWS_BUCKET_NAME);
-  console.log('🌍 Región:', process.env.AWS_REGION);
   console.log('🔧 Entorno:', process.env.NODE_ENV || 'development');
-  console.log('🔗 API disponible en: http://localhost:' + PORT + '/api');
 });
