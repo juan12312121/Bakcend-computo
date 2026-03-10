@@ -1,222 +1,90 @@
-// src/config/aws.js
-const AWS = require('aws-sdk');
 const multer = require('multer');
-const multerS3 = require('multer-s3');
 const path = require('path');
+const fs = require('fs');
 
-AWS.config.update({
-  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-  region: process.env.AWS_REGION || 'us-east-1'
+const uploadsBase = path.join(__dirname, '../uploads');
+
+// Crear carpetas
+['perfiles', 'portadas', 'publicaciones', 'documentos'].forEach(carpeta => {
+  const dir = path.join(uploadsBase, carpeta);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 });
 
-const s3 = new AWS.S3({
-  apiVersion: '2006-03-01',
-  signatureVersion: 'v4'
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    let destino;
+    if (file.fieldname === 'foto_perfil') destino = path.join(uploadsBase, 'perfiles');
+    else if (file.fieldname === 'foto_portada') destino = path.join(uploadsBase, 'portadas');
+    else if (file.fieldname === 'documentos') destino = path.join(uploadsBase, 'documentos');
+    else destino = path.join(uploadsBase, 'publicaciones');
+    cb(null, destino);
+  },
+  filename: (req, file, cb) => {
+    const usuario_id = req.usuario?.id ?? 'anon';
+    const ts = Date.now();
+    const random = Math.floor(Math.random() * 10000);
+    const ext = path.extname(file.originalname).toLowerCase();
+    cb(null, `${file.fieldname}-${usuario_id}-${ts}-${random}${ext}`);
+  }
 });
 
-// ============================================
-// FILTRO PARA IMÁGENES
-// ============================================
 const imageFilter = (req, file, cb) => {
   const allowed = /jpeg|jpg|png|gif|webp/;
-  const ext = allowed.test(path.extname(file.originalname).toLowerCase());
-  const mime = allowed.test(file.mimetype);
-  
-  if (mime && ext) {
+  if (allowed.test(path.extname(file.originalname).toLowerCase()) && allowed.test(file.mimetype)) {
     cb(null, true);
   } else {
-    cb(new Error('Solo se permiten imágenes (jpeg, jpg, png, gif, webp)'));
+    cb(new Error('Solo imágenes (jpeg, jpg, png, gif, webp)'));
   }
 };
 
-// ============================================
-// FILTRO PARA DOCUMENTOS
-// ============================================
 const documentFilter = (req, file, cb) => {
   const tiposPermitidos = [
-    'application/pdf',
-    'application/msword',
+    'application/pdf', 'application/msword',
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     'application/vnd.ms-excel',
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    'application/vnd.ms-powerpoint',
-    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-    'application/zip',
-    'application/x-rar-compressed',
-    'text/csv',
-    'text/plain'
+    'text/csv', 'text/plain'
   ];
-
-  if (tiposPermitidos.includes(file.mimetype)) {
-    cb(null, true);
-  } else {
-    cb(new Error('Tipo de archivo no permitido. Solo: PDF, Word, Excel, PowerPoint, ZIP, RAR, CSV, TXT'));
-  }
+  if (tiposPermitidos.includes(file.mimetype)) cb(null, true);
+  else cb(new Error('Tipo de archivo no permitido'));
 };
 
-// ============================================
-// 🆕 FILTRO COMBINADO (Imágenes + Documentos)
-// ============================================
 const combinedFilter = (req, file, cb) => {
-  // Si es el campo 'imagen', validar como imagen
-  if (file.fieldname === 'imagen' || file.fieldname === 'foto_perfil' || file.fieldname === 'foto_portada') {
-    return imageFilter(req, file, cb);
-  }
-  
-  // Si es el campo 'documentos', validar como documento
-  if (file.fieldname === 'documentos') {
-    return documentFilter(req, file, cb);
-  }
-
-  // Campo no reconocido
+  if (['imagen', 'foto_perfil', 'foto_portada'].includes(file.fieldname)) return imageFilter(req, file, cb);
+  if (file.fieldname === 'documentos') return documentFilter(req, file, cb);
   cb(new Error(`Campo no permitido: ${file.fieldname}`));
 };
 
-// ============================================
-// MULTER PARA IMÁGENES
-// ============================================
-const upload = multer({
-  storage: multerS3({
-    s3,
-    bucket: process.env.AWS_BUCKET_NAME,
-    contentType: multerS3.AUTO_CONTENT_TYPE,
-    metadata: (req, file, cb) => cb(null, { fieldName: file.fieldname }),
-    key: (req, file, cb) => {
-      const usuario_id = req.usuario?.id ?? 'anon';
-      const ts = Date.now();
-      const ext = path.extname(file.originalname).toLowerCase();
-      const carpeta = file.fieldname === 'foto_perfil' 
-        ? 'perfiles' 
-        : file.fieldname === 'foto_portada' 
-        ? 'portadas' 
-        : 'publicaciones';
-      const fileKey = `${carpeta}/${file.fieldname}-${usuario_id}-${ts}${ext}`;
-      console.log(`📤 Subiendo imagen a S3: ${fileKey}`);
-      cb(null, fileKey);
-    }
-  }),
-  fileFilter: imageFilter,
-  limits: {
-    fileSize: process.env.MAX_FILE_SIZE ? Number(process.env.MAX_FILE_SIZE) : 5 * 1024 * 1024
-  }
-});
+const upload = multer({ storage, fileFilter: imageFilter, limits: { fileSize: 5 * 1024 * 1024 } });
+const uploadDocumentos = multer({ storage, fileFilter: documentFilter, limits: { fileSize: 10 * 1024 * 1024 } });
+const uploadPublicacion = multer({ storage, fileFilter: combinedFilter, limits: { fileSize: 10 * 1024 * 1024, files: 6 } });
 
-// ============================================
-// MULTER PARA DOCUMENTOS
-// ============================================
-const uploadDocumentos = multer({
-  storage: multerS3({
-    s3,
-    bucket: process.env.AWS_BUCKET_NAME,
-    contentType: multerS3.AUTO_CONTENT_TYPE,
-    metadata: (req, file, cb) => cb(null, { fieldName: file.fieldname }),
-    key: (req, file, cb) => {
-      const usuario_id = req.usuario?.id ?? 'anon';
-      const ts = Date.now();
-      const ext = path.extname(file.originalname).toLowerCase();
-      const fileKey = `documentos/doc-${usuario_id}-${ts}${ext}`;
-      console.log(`📤 Subiendo documento a S3: ${fileKey}`);
-      cb(null, fileKey);
-    }
-  }),
-  fileFilter: documentFilter,
-  limits: {
-    fileSize: process.env.MAX_DOC_SIZE ? Number(process.env.MAX_DOC_SIZE) : 10 * 1024 * 1024 // 10MB para docs
-  }
-});
-
-// ============================================
-// 🆕 MULTER PARA PUBLICACIONES (Imagen + Documentos)
-// ============================================
-const uploadPublicacion = multer({
-  storage: multerS3({
-    s3,
-    bucket: process.env.AWS_BUCKET_NAME,
-    contentType: multerS3.AUTO_CONTENT_TYPE,
-    metadata: (req, file, cb) => cb(null, { fieldName: file.fieldname }),
-    key: (req, file, cb) => {
-      const usuario_id = req.usuario?.id ?? 'anon';
-      const ts = Date.now();
-      const random = Math.floor(Math.random() * 10000);
-      const ext = path.extname(file.originalname).toLowerCase();
-      
-      let carpeta, fileKey;
-      
-      // Determinar carpeta según el tipo de archivo
-      if (file.fieldname === 'imagen') {
-        carpeta = 'publicaciones';
-        fileKey = `${carpeta}/img-${usuario_id}-${ts}${ext}`;
-      } else if (file.fieldname === 'documentos') {
-        carpeta = 'documentos';
-        fileKey = `${carpeta}/doc-${usuario_id}-${ts}-${random}${ext}`;
-      } else {
-        carpeta = 'otros';
-        fileKey = `${carpeta}/file-${usuario_id}-${ts}${ext}`;
-      }
-      
-      console.log(`📤 Subiendo archivo a S3: ${fileKey}`);
-      cb(null, fileKey);
-    }
-  }),
-  fileFilter: combinedFilter,
-  limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB límite general
-    files: 6 // Máximo: 1 imagen + 5 documentos
-  }
-});
-
-// ============================================
-// ELIMINAR DE S3
-// ============================================
+// Simular deleteFromS3 con disco local
 const deleteFromS3 = async (keyOrUrl) => {
   if (!keyOrUrl) return false;
-  
-  let Key = keyOrUrl;
   try {
-    const urlPrefix = process.env.AWS_S3_URL;
-    if (typeof keyOrUrl === 'string' && urlPrefix && keyOrUrl.startsWith(urlPrefix)) {
-      Key = keyOrUrl.substring(urlPrefix.length + 1);
-    } else if (typeof keyOrUrl === 'string' && keyOrUrl.includes('/')) {
-      const parts = keyOrUrl.split('/');
-      Key = parts.slice(3).join('/');
+    const filePath = keyOrUrl.startsWith('/') ? keyOrUrl : path.join(uploadsBase, keyOrUrl);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+      console.log(`✅ Archivo eliminado: ${filePath}`);
     }
-
-    const params = {
-      Bucket: process.env.AWS_BUCKET_NAME,
-      Key
-    };
-
-    await s3.deleteObject(params).promise();
-    console.log(`✅ Eliminado de S3: ${Key}`);
     return true;
   } catch (err) {
-    console.error('❌ Error al eliminar de S3:', err.message || err);
+    console.error('❌ Error al eliminar archivo:', err.message);
     return false;
   }
 };
 
-// ============================================
-// URL FIRMADA
-// ============================================
-const getSignedUrl = (key, expires = 3600) => {
-  try {
-    return s3.getSignedUrl('getObject', {
-      Bucket: process.env.AWS_BUCKET_NAME,
-      Key: key,
-      Expires: expires
-    });
-  } catch (err) {
-    console.error('❌ Error al generar URL firmada:', err.message || err);
-    return null;
-  }
+const getSignedUrl = (key) => {
+  return `${process.env.API_URL}/uploads/${key}`;
 };
 
-module.exports = {
-  s3,
-  upload,              // Para imágenes (perfil, portada, etc)
-  uploadDocumentos,    // Para documentos individuales
-  uploadPublicacion,   // 🆕 Para publicaciones (imagen + documentos)
-  deleteFromS3,
-  getSignedUrl
+// s3 simulado para no romper imports
+const s3 = {
+  headBucket: () => ({ promise: () => Promise.resolve() }),
+  listObjectsV2: () => ({ promise: () => Promise.resolve({ Contents: [] }) }),
+  deleteObject: () => ({ promise: () => Promise.resolve() }),
+  getSignedUrl: () => ''
 };
+
+module.exports = { s3, upload, uploadDocumentos, uploadPublicacion, deleteFromS3, getSignedUrl };
