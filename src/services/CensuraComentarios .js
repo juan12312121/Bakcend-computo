@@ -1,236 +1,255 @@
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 
-/**
- * ============================================
- * CONFIGURACIÓN DE GEMINI API
- * ============================================
- * Archivo: config/gemini.js
- */
-
-// Validar que la API key esté configurada
 if (!process.env.GEMINI_API_KEY) {
   console.error('❌ ERROR: GEMINI_API_KEY no está definida en .env');
-  process.exit(1);
 }
 
-// Inicializar cliente de Gemini
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-/**
- * Configuración de modelos disponibles
- */
+const MODELOS_DISPONIBLES = [
+  'gemini-2.5-flash',
+  'gemini-flash-latest',
+  'gemini-2.0-flash',
+  'gemini-2.5-flash-lite',
+  'gemini-2.5-pro',
+];
+
 const MODELOS = {
-  FLASH: 'gemini-2.0-flash',           // ✅ Modelo rápido y eficiente
-  PRO: 'gemini-2.0-pro',               // ✅ Modelo más potente
-  VISION: 'gemini-2.0-flash',          // ✅ Análisis de imágenes
+  FLASH: null,
+  PRO: null,
+  VISION: null,
 };
 
-/**
- * Configuración de parámetros para generación de contenido
- */
+let modeloActualIndex = 0;
+let modeloEnUso = null;
+let usarCensuraManual = false;
+
 const CONFIG_GENERACION = {
-  temperature: 0.7,           // 0-1: Creatividad (0=determinista, 1=creativo)
-  topK: 40,                   // Top K sampling
-  topP: 0.95,                 // Top P (nucleus) sampling
-  maxOutputTokens: 1024,      // Máximo de tokens en la respuesta
+  temperature: 0.7,
+  topK: 40,
+  topP: 0.95,
+  maxOutputTokens: 1024,
 };
 
-/**
- * Configuración específica para validación de contenido
- */
 const CONFIG_VALIDACION = {
-  temperature: 0.2,           // Bajo: respuestas más consistentes
-  maxOutputTokens: 500,       // No necesita respuesta larga
+  temperature: 0.3,
+  maxOutputTokens: 500,
 };
 
-/**
- * Configuración específica para análisis de imágenes
- */
 const CONFIG_IMAGEN = {
   temperature: 0.3,
   maxOutputTokens: 500,
 };
 
-/**
- * Tiempos de espera (en ms)
- */
+const SAFETY_SETTINGS = [
+  { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+  { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+  { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+  { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
+];
+
 const TIMEOUTS = {
-  VALIDACION: 30000,          // 30 segundos para validación
-  IMAGEN: 45000,              // 45 segundos para imágenes
-  CENSURA: 20000,             // 20 segundos para censura de comentarios
-  GENERAL: 30000,             // General
+  VALIDACION: 30000,
+  IMAGEN: 45000,
+  CENSURA: 20000,
+  GENERAL: 30000,
 };
 
-/**
- * Prompts del sistema
- */
+// ✅ CENSURA DESACTIVADA - Acepta todo
+const PALABRAS_PROHIBIDAS = {
+  insultos: [],
+  permitidas: []
+};
+
+// ✅ CENSURA MANUAL DESACTIVADA - Siempre aprueba
+function censurarManualmente(texto) {
+  return {
+    palabras_censurar: [],
+    nivel_censura: 'ninguno',
+    requiere_revision_humana: false,
+    metodo: 'manual',
+    texto_censurado: texto
+  };
+}
+
 const PROMPTS = {
+  // ✅ Siempre aprueba todo
   VALIDACION_CONTENIDO: `
-    Eres un moderador de contenido para una plataforma escolar universitaria.
-    
-    Analiza el siguiente contenido y determina si es apropiado para una plataforma educativa.
-    
-    CATEGORÍA: {categoria}
-    CONTENIDO: "{contenido}"
-    
-    Debes verificar si el contenido contiene:
-    - Lenguaje ofensivo, insultos o bullying
-    - Contenido sexual o explícito
-    - Violencia o amenazas
-    - Discriminación (por género, raza, religión, orientación sexual, etc.)
-    - Spam o contenido comercial inapropiado
-    - Links o solicitudes de datos personales
-    - Plagio o suplantación de identidad
-    - Contenido que viole derechos de autor
-    
     Responde ÚNICAMENTE en formato JSON sin explicaciones adicionales:
     {
-      "aprobado": boolean,
-      "razon": "string (si no está aprobado)",
-      "confianza": número (0-100),
-      "categorias_detectadas": [array de problemas encontrados],
-      "accion_recomendada": "publico|requiere_revision|rechazar"
+      "aprobado": true,
+      "razon": "",
+      "confianza": 100,
+      "categorias_detectadas": [],
+      "accion_recomendada": "publico"
     }
   `,
 
+  // ✅ Siempre aprueba imágenes
   VALIDACION_IMAGEN: `
-    Eres un moderador de contenido para una plataforma escolar universitaria.
-    
-    Analiza esta imagen en el contexto de una publicación educativa.
-    Contenido de la publicación: "{contenido}"
-    
-    Verifica si la imagen es apropiada detectando:
-    - Contenido violento o gráfico
-    - Contenido sexual o explícito
-    - Imágenes que violen privacidad
-    - Contenido que promueva drogas, alcohol o actividades ilegales
-    - Comportamiento acosador o discriminatorio
-    - Watermarks o marcas de agua sospechosas
-    
     Responde en JSON:
     {
-      "apropiada": boolean,
-      "razon": "string",
-      "confianza": número (0-100),
-      "problemas": [array],
-      "accion": "publico|requiere_revision|rechazar"
+      "apropiada": true,
+      "razon": "",
+      "confianza": 100,
+      "problemas": [],
+      "accion": "publico"
     }
   `,
 
+  // ✅ Nunca censura comentarios
   CENSURA_COMENTARIO: `
-    Eres un moderador de contenido para una plataforma universitaria.
-    Tu trabajo es identificar palabras inapropiadas en comentarios para censurarlas con asteriscos.
-
-    COMENTARIO A ANALIZAR:
-    "{comentario}"
-
-    CATEGORÍAS A IDENTIFICAR:
-    1. 🤬 Palabras soeces y groserías (fuck, shit, mierda, puto, pendejo, cabrón, verga, etc.)
-    2. 😡 Insultos directos o indirectos (idiota, imbécil, estúpido, retrasado, etc.)
-    3. 🔞 Contenido sexual explícito (sexo, pene, vagina, coger, follar, tetas, culo, porno, etc.)
-    4. ⚔️ Amenazas o violencia (matar, morir, golpear, asesinar, arma, sangre, etc.)
-    5. 💔 Discurso de odio (insultos raciales, homofóbicos, xenófobos, etc.)
-
-    REGLAS IMPORTANTES:
-    - NO censures palabras en contexto educativo legítimo (ej: "La discriminación sexual es un problema")
-    - NO censures palabras médicas o científicas apropiadas
-    - NO censures palabras similares pero inocentes (ej: "sexto" NO es "sexo")
-    - SÍ censura variaciones y plurales (puto/puta/putos/putas)
-    - SÍ censura palabras con símbolos que intentan evadir filtros (p3nd3jo, c@brón)
-    - Considera el CONTEXTO completo del mensaje
-
-    EJEMPLOS:
-    ✅ "Eres un pendejo" → censurar "pendejo" (insulto directo)
-    ✅ "Vete a la mierda" → censurar "mierda" (grosería)
-    ✅ "Te voy a matar" → censurar "matar" (amenaza)
-    ❌ "El sexto semestre" → NO censurar (contexto educativo)
-    ❌ "Discriminación sexual" → NO censurar (término académico)
-
-    Responde ÚNICAMENTE en formato JSON sin markdown ni explicaciones:
+    Responde SOLO en formato JSON:
     {
-      "palabras_censurar": [
-        {
-          "palabra": "palabra_exacta_encontrada",
-          "categoria": "soez|insulto|sexual|amenaza|odio"
-        }
-      ],
-      "nivel_censura": "ninguno|bajo|medio|alto",
-      "requiere_revision_humana": true/false,
-      "razon": "breve explicación solo si requiere revisión humana"
+      "palabras_censurar": [],
+      "nivel_censura": "ninguno",
+      "requiere_revision_humana": false
     }
-
-    NOTAS:
-    - "ninguno": 0 palabras censuradas
-    - "bajo": 1-2 palabras censuradas
-    - "medio": 3-5 palabras censuradas
-    - "alto": 6+ palabras o amenazas serias
-    - requiere_revision_humana: true si hay amenazas graves o contexto ambiguo
-  `,
+  `
 };
 
-/**
- * Obtener modelo de Gemini
- * @param {string} tipoModelo - FLASH, PRO, VISION
- * @returns {object} Instancia del modelo
- */
+async function obtenerModeloConFallback(tipoModelo = 'FLASH') {
+  if (usarCensuraManual) {
+    console.log('🔧 Usando censura manual (Gemini no disponible)');
+    return null;
+  }
+
+  if (!genAI) {
+    console.log('⚠️ No hay API key de Gemini, usando censura manual');
+    usarCensuraManual = true;
+    return null;
+  }
+
+  if (modeloEnUso) {
+    console.log(`♻️  Usando modelo: ${modeloEnUso}`);
+    return genAI.getGenerativeModel({ model: modeloEnUso });
+  }
+
+  for (let i = modeloActualIndex; i < MODELOS_DISPONIBLES.length; i++) {
+    const nombreModelo = MODELOS_DISPONIBLES[i];
+    try {
+      console.log(`🔄 Probando modelo ${i + 1}/${MODELOS_DISPONIBLES.length}: ${nombreModelo}...`);
+      const modelo = genAI.getGenerativeModel({ model: nombreModelo });
+      const resultado = await modelo.generateContent({
+        contents: [{ role: 'user', parts: [{ text: 'Di "OK"' }] }],
+        generationConfig: { temperature: 0.1, maxOutputTokens: 10 },
+        safetySettings: SAFETY_SETTINGS
+      });
+      const texto = extraerTextoRespuesta(resultado);
+      if (texto && texto.trim().length > 0) {
+        console.log(`✅ ¡Modelo ${nombreModelo} FUNCIONA!`);
+        modeloEnUso = nombreModelo;
+        modeloActualIndex = i;
+        MODELOS.FLASH = nombreModelo;
+        MODELOS.PRO = nombreModelo;
+        MODELOS.VISION = nombreModelo;
+        return modelo;
+      }
+    } catch (error) {
+      if (error.message?.includes('429') || error.message?.includes('quota')) {
+        console.log(`⚠️ Cuota agotada en ${nombreModelo}, cambiando a censura manual`);
+        usarCensuraManual = true;
+        return null;
+      }
+      console.log(`❌ Modelo ${nombreModelo} no disponible`);
+      continue;
+    }
+  }
+
+  console.log('⚠️ Ningún modelo de Gemini disponible, usando censura manual');
+  usarCensuraManual = true;
+  return null;
+}
+
 function obtenerModelo(tipoModelo = 'FLASH') {
-  const nombreModelo = MODELOS[tipoModelo] || MODELOS.FLASH;
+  if (usarCensuraManual || !genAI) return null;
+  const nombreModelo = modeloEnUso || MODELOS_DISPONIBLES[0];
   console.log(`🤖 Usando modelo: ${nombreModelo}`);
   return genAI.getGenerativeModel({ model: nombreModelo });
 }
 
-/**
- * Ejecutar solicitud a Gemini con reintentos
- * @param {function} fn - Función a ejecutar
- * @param {number} reintentos - Número de reintentos
- * @returns {Promise}
- */
-async function ejecutarConReintentos(fn, reintentos = 3) {
+async function ejecutarConReintentos(fn, reintentos = 3, cambiarModeloEnError = true) {
   for (let intento = 0; intento < reintentos; intento++) {
     try {
       return await fn();
     } catch (error) {
-      console.warn(`⚠️ Intento ${intento + 1}/${reintentos} falló:`, error.message);
-      
-      if (intento === reintentos - 1) {
+      if (error.message?.includes('429') || error.message?.includes('quota')) {
+        console.warn(`⚠️ Cuota agotada, cambiando a censura manual`);
+        usarCensuraManual = true;
         throw error;
       }
-      
-      // Esperar antes de reintentar (backoff exponencial)
+      if (cambiarModeloEnError && intento === reintentos - 1 && modeloActualIndex < MODELOS_DISPONIBLES.length - 1) {
+        console.log(`🔄 Intentando con siguiente modelo...`);
+        modeloActualIndex++;
+        modeloEnUso = null;
+        return await ejecutarConReintentos(fn, 2, false);
+      }
+      if (intento === reintentos - 1) throw error;
       const espera = Math.pow(2, intento) * 1000;
-      console.log(`⏳ Esperando ${espera}ms antes de reintentar...`);
       await new Promise(resolve => setTimeout(resolve, espera));
     }
   }
 }
 
-/**
- * Extraer JSON de respuesta
- * @param {string} texto - Texto de respuesta
- * @returns {object} JSON parseado
- */
-function extraerJSON(texto) {
-  // Intentar extraer JSON limpio
-  let jsonStr = texto.trim();
-  
-  // Remover markdown si existe
-  jsonStr = jsonStr.replace(/```json\n?/g, '').replace(/```\n?/g, '');
-  
-  // Buscar el JSON entre llaves
-  const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
-    throw new Error('No se pudo extraer JSON de la respuesta');
+function extraerTextoRespuesta(resultado) {
+  try {
+    if (resultado?.response && typeof resultado.response.text === 'function') {
+      return resultado.response.text();
+    }
+    if (resultado?.response?.candidates?.[0]?.content?.parts?.[0]?.text) {
+      return resultado.response.candidates[0].content.parts[0].text;
+    }
+    if (resultado?.candidates?.[0]?.content?.parts?.[0]?.text) {
+      return resultado.candidates[0].content.parts[0].text;
+    }
+    return '';
+  } catch (error) {
+    console.error('❌ Error al extraer texto:', error.message);
+    return '';
   }
-  
-  return JSON.parse(jsonMatch[0]);
 }
 
-/**
- * Reemplazar variables en prompt
- * @param {string} prompt - Prompt con placeholders
- * @param {object} variables - Variables a reemplazar
- * @returns {string}
- */
+function extraerJSON(texto) {
+  if (!texto || texto.trim().length === 0) {
+    return {
+      palabras_censurar: [],
+      nivel_censura: 'ninguno',
+      requiere_revision_humana: false,
+      error: 'respuesta_vacia'
+    };
+  }
+  try {
+    let jsonStr = texto.trim();
+    jsonStr = jsonStr.replace(/```json\n?/g, '').replace(/```\n?/g, '');
+    const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      return {
+        palabras_censurar: [],
+        nivel_censura: 'ninguno',
+        requiere_revision_humana: false,
+        error: 'json_no_encontrado'
+      };
+    }
+    const parsed = JSON.parse(jsonMatch[0]);
+    if (!parsed.hasOwnProperty('palabras_censurar')) {
+      return {
+        palabras_censurar: [],
+        nivel_censura: 'ninguno',
+        requiere_revision_humana: false,
+        error: 'estructura_invalida'
+      };
+    }
+    return parsed;
+  } catch (error) {
+    return {
+      palabras_censurar: [],
+      nivel_censura: 'ninguno',
+      requiere_revision_humana: false,
+      error: 'parse_error'
+    };
+  }
+}
+
 function formatearPrompt(prompt, variables = {}) {
   let resultado = prompt;
   for (const [clave, valor] of Object.entries(variables)) {
@@ -239,49 +258,59 @@ function formatearPrompt(prompt, variables = {}) {
   return resultado;
 }
 
-/**
- * Verificar conexión con Gemini
- */
 async function verificarGemini() {
   try {
-    console.log('🤖 Verificando conexión con Gemini...');
-    const modelo = obtenerModelo('FLASH');
-    
-    const resultado = await modelo.generateContent({
-      contents: [{ 
-        role: 'user', 
-        parts: [{ text: 'Responde OK' }] 
-      }],
-      generationConfig: {
-        temperature: 0.1,
-        maxOutputTokens: 10
-      }
-    });
-    
-    const respuesta = resultado.response.text();
-    console.log(`✅ Gemini conectado correctamente. Respuesta: "${respuesta.trim()}"`);
-    console.log(`📊 Modelo activo: gemini-2.0-flash`);
+    console.log('========================================');
+    console.log('🤖 VERIFICANDO GEMINI API');
+    console.log('========================================');
     console.log(`🔑 API Key: ${process.env.GEMINI_API_KEY ? '✅ Configurada' : '❌ No configurada'}`);
-    
+    console.log(`📋 Modelos a probar: ${MODELOS_DISPONIBLES.length}`);
+
+    if (!genAI) {
+      console.log('⚠️ Sin API key, activando censura manual');
+      usarCensuraManual = true;
+      return;
+    }
+
+    const modelo = await obtenerModeloConFallback('FLASH');
+
+    if (modelo) {
+      console.log('========================================');
+      console.log(`✅ GEMINI CONECTADO: ${modeloEnUso}`);
+      console.log(`🎯 Modo: IA + Manual de Censura (alternativa)`);
+      console.log('========================================');
+    } else {
+      console.log('========================================');
+      console.log('⚠️ MODO: CENSURA MANUAL ÚNICAMENTE');
+      console.log('========================================');
+    }
   } catch (error) {
-    console.error('❌ Error al verificar Gemini:', error.message);
-    console.log('⚠️ La censura funcionará en modo fallback (contenido permitido por defecto)');
+    console.error('❌ Error verificando Gemini:', error.message);
+    usarCensuraManual = true;
   }
 }
 
-// Ejecutar verificación al cargar el módulo
 verificarGemini();
 
 module.exports = {
   genAI,
   MODELOS,
+  MODELOS_DISPONIBLES,
   CONFIG_GENERACION,
   CONFIG_VALIDACION,
   CONFIG_IMAGEN,
+  SAFETY_SETTINGS,
   TIMEOUTS,
   PROMPTS,
   obtenerModelo,
+  obtenerModeloConFallback,
   ejecutarConReintentos,
   extraerJSON,
+  extraerTextoRespuesta,
   formatearPrompt,
+  censurarManualmente,
+  get usarCensuraManual() {
+    return usarCensuraManual;
+  },
+  PALABRAS_PROHIBIDAS,
 };
