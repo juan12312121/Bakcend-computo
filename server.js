@@ -8,32 +8,13 @@ const app = require('./src/app');
 const PORT = process.env.PORT || 3000;
 const HOST = '0.0.0.0';
 
+const socketConfig = require('./src/config/socket');
 const server = http.createServer(app);
 
-const io = new Server(server, {
-  cors: {
-    origin: '*',
-    methods: ['GET', 'POST']
-  }
-});
+// Inicializar Socket.io con la configuración unificada
+const io = socketConfig.init(server);
 
-io.on('connection', (socket) => {
-  console.log('🔌 Cliente conectado:', socket.id);
-
-  socket.on('join_chat', (chatId) => {
-    socket.join(`chat_${chatId}`);
-  });
-
-  socket.on('leave_chat', (chatId) => {
-    socket.leave(`chat_${chatId}`);
-  });
-
-  socket.on('disconnect', () => {
-    console.log('🔌 Cliente desconectado:', socket.id);
-  });
-});
-
-// Exportar io para usarlo en controladores
+// Mantener compatibilidad con global.io
 global.io = io;
 
 server.listen(PORT, HOST, () => {

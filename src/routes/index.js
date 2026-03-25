@@ -13,6 +13,10 @@ const likeRoutes = require('./like');
 const notificacionesRoutes = require('./notificacionesRoutes');
 const reporteRoutes = require('./reporteRoutes');
 const documentosRoutes = require('./documentos');
+const grupoRoutes = require('./grupoRoutes');
+const chatRoutes = require('./chatRoutes');
+const aiRoutes = require('./aiRoutes');
+const adminRoutes = require('./adminRoutes');
 
 // Usar rutas
 router.use('/auth', authRoutes);
@@ -26,5 +30,9 @@ router.use('/likes', likeRoutes);
 router.use('/notificaciones', notificacionesRoutes);
 router.use('/reportes', reporteRoutes);
 router.use('/documentos', documentosRoutes);
+router.use('/grupos', grupoRoutes);
+router.use('/chat', chatRoutes);
+router.use('/ai', aiRoutes);
+router.use('/admin', adminRoutes);
 
 module.exports = router;

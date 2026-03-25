@@ -72,13 +72,15 @@ exports.actualizarPerfil = async (req, res) => {
     // Obtener usuario anterior para comparar / eliminar si procede
     const usuarioAnterior = await Usuario.buscarPorId(usuarioId);
 
+    const baseUrl = process.env.API_URL || 'http://localhost:3000';
+
     // Manejar foto de perfil
     if (req.files && req.files.foto_perfil && req.files.foto_perfil.length > 0) {
       const fotoPerfil = req.files.foto_perfil[0];
-      datosActualizar.foto_perfil_url = fotoPerfil.location;
-      datosActualizar.foto_perfil_s3 = fotoPerfil.key;
+      datosActualizar.foto_perfil_url = fotoPerfil.location || `${baseUrl}/uploads/perfiles/${fotoPerfil.filename}`;
+      datosActualizar.foto_perfil_s3 = fotoPerfil.key || `perfiles/${fotoPerfil.filename}`;
 
-      console.log('✅ Foto de perfil guardada en S3:', fotoPerfil.location, fotoPerfil.key);
+      console.log('✅ Foto de perfil guardada en S3/Local:', datosActualizar.foto_perfil_url, datosActualizar.foto_perfil_s3);
       // Eliminar anterior solo si existe y es distinta a la nueva
       try {
         if (usuarioAnterior?.foto_perfil_s3 && usuarioAnterior.foto_perfil_s3 !== datosActualizar.foto_perfil_s3) {
@@ -93,10 +95,10 @@ exports.actualizarPerfil = async (req, res) => {
     // Manejar foto de portada
     if (req.files && req.files.foto_portada && req.files.foto_portada.length > 0) {
       const fotoPortada = req.files.foto_portada[0];
-      datosActualizar.foto_portada_url = fotoPortada.location;
-      datosActualizar.foto_portada_s3 = fotoPortada.key;
+      datosActualizar.foto_portada_url = fotoPortada.location || `${baseUrl}/uploads/portadas/${fotoPortada.filename}`;
+      datosActualizar.foto_portada_s3 = fotoPortada.key || `portadas/${fotoPortada.filename}`;
 
-      console.log('✅ Foto de portada guardada en S3:', fotoPortada.location, fotoPortada.key);
+      console.log('✅ Foto de portada guardada en S3/Local:', datosActualizar.foto_portada_url, datosActualizar.foto_portada_s3);
       try {
         if (usuarioAnterior?.foto_portada_s3 && usuarioAnterior.foto_portada_s3 !== datosActualizar.foto_portada_s3) {
           await deleteFromS3(usuarioAnterior.foto_portada_s3);
@@ -118,10 +120,10 @@ exports.actualizarPerfil = async (req, res) => {
       // limpiar archivos subidos si hay fallo
       if (req.files) {
         try {
-          if (req.files.foto_perfil) await deleteFromS3(req.files.foto_perfil[0].key);
+          if (req.files.foto_perfil) await deleteFromS3(req.files.foto_perfil[0].key || `perfiles/${req.files.foto_perfil[0].filename}`);
         } catch (e) { console.error('Error limpiando foto_perfil:', e); }
         try {
-          if (req.files.foto_portada) await deleteFromS3(req.files.foto_portada[0].key);
+          if (req.files.foto_portada) await deleteFromS3(req.files.foto_portada[0].key || `portadas/${req.files.foto_portada[0].filename}`);
         } catch (e) { console.error('Error limpiando foto_portada:', e); }
       }
       return errorResponse(res, 'No se pudo actualizar el perfil', 400);
@@ -146,10 +148,10 @@ exports.actualizarPerfil = async (req, res) => {
     // Eliminar archivos subidos a S3 si hay error
     if (req.files) {
       try {
-        if (req.files.foto_perfil) await deleteFromS3(req.files.foto_perfil[0].key);
+        if (req.files.foto_perfil) await deleteFromS3(req.files.foto_perfil[0].key || `perfiles/${req.files.foto_perfil[0].filename}`);
       } catch (e) { console.error('Error al limpiar foto de perfil:', e); }
       try {
-        if (req.files.foto_portada) await deleteFromS3(req.files.foto_portada[0].key);
+        if (req.files.foto_portada) await deleteFromS3(req.files.foto_portada[0].key || `portadas/${req.files.foto_portada[0].filename}`);
       } catch (e) { console.error('Error al limpiar foto de portada:', e); }
     }
 

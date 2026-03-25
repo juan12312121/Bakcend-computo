@@ -46,7 +46,7 @@ exports.crearPublicacion = async (req, res) => {
   let documentosSubidos = [];
   
   try {
-    const { contenido, categoria, visibilidad } = req.body;
+    const { contenido, categoria, visibilidad, grupo_id } = req.body;
 
     // Validar contenido
     if (!contenido || contenido.trim().length === 0) {
@@ -192,14 +192,15 @@ exports.crearPublicacion = async (req, res) => {
       requiereRevision = true;
     }
 
-    // 📝 CREAR PUBLICACIÓN EN BD CON VISIBILIDAD
+    // 📝 CREAR PUBLICACIÓN EN BD CON VISIBILIDAD Y GRUPO
     const nuevaPublicacionId = await Publicacion.crear({
       usuario_id: req.usuario.id,
       contenido,
-      imagen_url: null,
-      imagen_s3: req.files?.imagen?.[0]?.location || null,
+      imagen_url: req.files?.imagen?.[0]?.location || (req.files?.imagen?.[0] ? `/uploads/publicaciones/${req.files.imagen[0].filename}` : null),
+      imagen_s3: req.files?.imagen?.[0]?.key || (req.files?.imagen?.[0] ? `publicaciones/${req.files.imagen[0].filename}` : null),
       categoria: categoria || 'General',
       visibilidad: visibilidadFinal,
+      grupo_id: grupo_id || null,
       requiere_revision: requiereRevision ? 1 : 0,
       analisis_censura: JSON.stringify(reporte)
     });
@@ -213,8 +214,8 @@ exports.crearPublicacion = async (req, res) => {
           const documentoId = await Documento.crear({
             usuario_id: req.usuario.id,
             publicacion_id: nuevaPublicacionId,
-            documento_url: null,
-            documento_s3: doc.location,
+            documento_url: doc.location || `/uploads/documentos/${doc.filename}`,
+            documento_s3: doc.key || `documentos/${doc.filename}`,
             nombre_archivo: doc.originalname,
             tamano_archivo: doc.size,
             tipo_archivo: doc.mimetype,
@@ -236,6 +237,15 @@ exports.crearPublicacion = async (req, res) => {
 
     // Obtener publicación completa con documentos
     const publicacion = await Publicacion.obtenerPorId(nuevaPublicacionId, req.usuario.id);
+
+    // 🆕 Emitir evento de nueva publicación por Socket.IO
+    if (global.io) {
+      if (publicacion.grupo_id) {
+        global.io.to(`group_${publicacion.grupo_id}`).emit('new_post', publicacion);
+      } else {
+        global.io.emit('new_post', publicacion);
+      }
+    }
 
     return successResponse(
       res, 
@@ -479,8 +489,8 @@ exports.actualizarPublicacion = async (req, res) => {
       if (publicacionActual.imagen_s3) {
         await deleteFromS3(publicacionActual.imagen_s3).catch(() => {});
       }
-      datosActualizar.imagen_s3 = req.file.location;
-      datosActualizar.imagen_url = null;
+      datosActualizar.imagen_s3 = req.file.key || `publicaciones/${req.file.filename}`;
+      datosActualizar.imagen_url = req.file.location || `/uploads/publicaciones/${req.file.filename}`;
     }
 
     const actualizado = await Publicacion.actualizar(id, req.usuario.id, datosActualizar);
@@ -493,6 +503,11 @@ exports.actualizarPublicacion = async (req, res) => {
     }
 
     const publicacionActualizada = await Publicacion.obtenerPorId(id, req.usuario.id);
+
+    // 🆕 Emitir evento de actualización
+    if (global.io) {
+      global.io.emit('update_post', publicacionActualizada);
+    }
 
     return successResponse(res, publicacionActualizada, 'Publicación actualizada correctamente');
 
@@ -569,6 +584,11 @@ exports.eliminarPublicacion = async (req, res) => {
 
     if (!eliminado) {
       return errorResponse(res, 'No se pudo eliminar la publicación', 400);
+    }
+
+    // 🆕 Emitir evento de eliminación
+    if (global.io) {
+      global.io.emit('delete_post', { id: Number(id) });
     }
 
     return successResponse(

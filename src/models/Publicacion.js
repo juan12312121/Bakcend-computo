@@ -11,8 +11,8 @@ class Publicacion {
   static async crear(datos) {
     const query = `
       INSERT INTO publicaciones 
-      (usuario_id, contenido, imagen_url, imagen_s3, categoria, color_categoria, visibilidad, requiere_revision, analisis_censura)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (usuario_id, contenido, imagen_url, imagen_s3, categoria, color_categoria, visibilidad, requiere_revision, analisis_censura, grupo_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     const categoriaColores = {
@@ -32,6 +32,7 @@ class Publicacion {
     const visibilidad = datos.visibilidad || 'publico';
     const requiereRevision = datos.requiere_revision || 0;
     const analisisCensura = datos.analisis_censura || null;
+    const grupoId = datos.grupo_id || null;
 
     const [resultado] = await db.execute(query, [
       datos.usuario_id,
@@ -42,7 +43,8 @@ class Publicacion {
       color,
       visibilidad,
       requiereRevision,
-      analisisCensura
+      analisisCensura,
+      grupoId
     ]);
 
     return resultado.insertId;

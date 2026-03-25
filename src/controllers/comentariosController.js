@@ -276,6 +276,11 @@ const comentarioController = {
       console.log('📊 Comentario obtenido:', JSON.stringify(comentario, null, 2));
       console.log('');
       
+      // 🆕 Emitir evento de nuevo comentario para actualizar conteo en feed y UI de detalle
+      if (global.io) {
+        global.io.emit('new_comment', comentario);
+      }
+
       console.log('╔════════════════════════════════════════╗');
       console.log('║  📤 ENVIANDO RESPUESTA AL CLIENTE      ║');
       console.log('╚════════════════════════════════════════╝');

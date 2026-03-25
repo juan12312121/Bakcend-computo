@@ -60,10 +60,13 @@ app.use(cors({
 }));
 
 app.use(compression());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(cookieParser());
 app.use(morgan('dev'));
+
+// 🆕 Configurar la carpeta de uploads para ser accesible de forma pública
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // 🆕 CONFIGURAR SSE EN EL MODELO ANTES DE REGISTRAR RUTAS
 console.log('========================================');

@@ -25,13 +25,23 @@ const init = (server) => {
         // Unirse a una sala privada de chat
         socket.on('join_chat', (chatId) => {
             socket.join(`chat_${chatId}`);
-            console.log(`💬 Usuario unido al chat: ${chatId}`);
+            console.log(`💬 Cliente ${socket.id} unido a chat_${chatId}`);
         });
 
-        // Salir de una sala de chat
         socket.on('leave_chat', (chatId) => {
             socket.leave(`chat_${chatId}`);
-            console.log(`💬 Usuario salió del chat: ${chatId}`);
+            console.log(`💬 Cliente ${socket.id} salió de chat_${chatId}`);
+        });
+
+        // 👥 Salas de grupos
+        socket.on('join_group', (grupoId) => {
+            socket.join(`group_${grupoId}`);
+            console.log(`👥 Cliente ${socket.id} unido a group_${grupoId}`);
+        });
+
+        socket.on('leave_group', (grupoId) => {
+            socket.leave(`group_${grupoId}`);
+            console.log(`👥 Cliente ${socket.id} salió de group_${grupoId}`);
         });
 
         // Manejar envío de mensajes (opcional si se usa REST para enviar)

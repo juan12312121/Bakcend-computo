@@ -41,6 +41,12 @@ const likeController = {
 
       console.log(`❤️ Usuario ${usuario_id} dio like a publicación ${publicacion_id}`);
 
+      // 🆕 Notificar cambio por sockets
+      if (global.io) {
+        const total = await Like.obtenerTotal(publicacion_id);
+        global.io.emit('like_update', { publicacion_id, total });
+      }
+
       return successResponse(res, null, 'Like agregado correctamente', 201);
     } catch (error) {
       console.error('❌ Error en agregarLike:', error);
@@ -77,6 +83,12 @@ const likeController = {
 
       console.log(`💔 Usuario ${usuario_id} quitó like de publicación ${publicacion_id}`);
 
+      // 🆕 Notificar cambio por sockets
+      if (global.io) {
+        const total = await Like.obtenerTotal(publicacion_id);
+        global.io.emit('like_update', { publicacion_id, total });
+      }
+
       return successResponse(res, null, 'Like eliminado correctamente', 200);
     } catch (error) {
       console.error('❌ Error en eliminarLike:', error);
@@ -110,6 +122,12 @@ const likeController = {
         
         console.log(`💔 Usuario ${usuario_id} quitó like de publicación ${publicacion_id}`);
         
+        // 🆕 Notificar cambio por sockets
+        if (global.io) {
+          const total = await Like.obtenerTotal(publicacion_id);
+          global.io.emit('like_update', { publicacion_id, total });
+        }
+        
         return successResponse(res, { liked: false }, 'Like eliminado', 200);
       } else {
         // AGREGAR LIKE
@@ -118,6 +136,12 @@ const likeController = {
         await Notificacion.crearNotificacionLike(publicacion_id, usuario_id);
         
         console.log(`❤️ Usuario ${usuario_id} dio like a publicación ${publicacion_id}`);
+        
+        // 🆕 Notificar cambio por sockets
+        if (global.io) {
+          const total = await Like.obtenerTotal(publicacion_id);
+          global.io.emit('like_update', { publicacion_id, total });
+        }
         
         return successResponse(res, { liked: true }, 'Like agregado', 201);
       }

@@ -55,7 +55,7 @@ const combinedFilter = (req, file, cb) => {
   cb(new Error(`Campo no permitido: ${file.fieldname}`));
 };
 
-const upload = multer({ storage, fileFilter: imageFilter, limits: { fileSize: 5 * 1024 * 1024 } });
+const upload = multer({ storage, fileFilter: imageFilter, limits: { fileSize: 50 * 1024 * 1024 } });
 const uploadDocumentos = multer({ storage, fileFilter: documentFilter, limits: { fileSize: 10 * 1024 * 1024 } });
 const uploadPublicacion = multer({ storage, fileFilter: combinedFilter, limits: { fileSize: 10 * 1024 * 1024, files: 6 } });
 
