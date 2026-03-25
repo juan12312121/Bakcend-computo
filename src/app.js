@@ -37,7 +37,8 @@ const publicacionesDir = path.join(uploadsDir, 'publicaciones');
 // Middlewares
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" },
-  crossOriginEmbedderPolicy: false
+  crossOriginEmbedderPolicy: false,
+  contentSecurityPolicy: false // Deshabilitar temporalmente para depuración si es necesario
 }));
 
 app.use(cors({
@@ -65,8 +66,16 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(cookieParser());
 app.use(morgan('dev'));
 
-// 🆕 Configurar la carpeta de uploads para ser accesible de forma pública
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+// 🆕 Servir carpeta uploads con CORS y caché control
+app.use('/uploads', (req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  next();
+}, express.static(path.join(__dirname, 'uploads'), {
+  maxAge: '1d',
+  etag: true,
+  lastModified: true
+}));
 
 // 🆕 CONFIGURAR SSE EN EL MODELO ANTES DE REGISTRAR RUTAS
 console.log('========================================');
@@ -192,12 +201,21 @@ app.get('/debug/uploads', (req, res) => {
     
     let archivosPerfiles = [];
     let archivosPublicaciones = [];
+    let archivosPortadas = []; // Nuevo array para portadas
     
     if (perfilesExists) {
       archivosPerfiles = fs.readdirSync(perfilesDir).map(file => ({
         nombre: file,
         ruta: `/uploads/perfiles/${file}`,
         tamaño: fs.statSync(path.join(perfilesDir, file)).size
+      }));
+    }
+
+    if (fs.existsSync(portadasDir)) { // Verificar y listar archivos en portadasDir
+      archivosPortadas = fs.readdirSync(portadasDir).map(file => ({
+        nombre: file,
+        ruta: `/uploads/portadas/${file}`,
+        tamaño: fs.statSync(path.join(portadasDir, file)).size
       }));
     }
     

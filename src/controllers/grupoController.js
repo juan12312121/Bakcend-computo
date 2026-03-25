@@ -48,9 +48,11 @@ const grupoController = {
             const { nombre, descripcion, privacidad } = req.body;
             const creador_id = req.usuario.id;
 
-            // Manejo de imágenes (Multer las pone en req.files si usas Fields)
-            const imagen_url = req.files?.foto_perfil ? req.files.foto_perfil[0].location || `/uploads/grupos/${req.files.foto_perfil[0].filename}` : null;
-            const imagen_portada_url = req.files?.foto_portada ? req.files.foto_portada[0].location || `/uploads/portadas/${req.files.foto_portada[0].filename}` : null;
+            // Manejo de imágenes estandarizado: 
+            // - Avatar del grupo a 'perfiles'
+            // - Portada del grupo a 'portadas'
+            const imagen_url = req.files?.foto_perfil ? `${process.env.API_URL}/uploads/perfiles/${req.files.foto_perfil[0].filename}` : null;
+            const imagen_portada_url = req.files?.foto_portada ? `${process.env.API_URL}/uploads/portadas/${req.files.foto_portada[0].filename}` : null;
 
             const [result] = await db.query(
                 'INSERT INTO grupos (nombre, descripcion, privacidad, creador_id, imagen_url, imagen_portada_url) VALUES (?, ?, ?, ?, ?, ?)',
