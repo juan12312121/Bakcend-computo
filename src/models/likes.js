@@ -87,9 +87,10 @@ class Like {
         'SELECT COUNT(*) as total FROM likes WHERE publicacion_id = ?',
         [publicacion_id]
       );
-      return result[0].total;
+      return result[0] ? Number(result[0].total) : 0;
     } catch (error) {
-      throw error;
+      console.error('Error in Like.obtenerTotal:', error);
+      return 0;
     }
   }
 
@@ -129,7 +130,7 @@ class Like {
         'SELECT COUNT(*) as total FROM likes WHERE usuario_id = ?',
         [usuario_id]
       );
-      return result[0].total;
+      return result[0] ? Number(result[0].total) : 0;
     } catch (error) {
       throw error;
     }

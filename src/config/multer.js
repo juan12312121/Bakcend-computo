@@ -2,87 +2,104 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
-// ✅ Usar rutas ABSOLUTAS basadas en la ubicación de server.js
-const uploadsBase = path.join(__dirname, '../uploads');
+const uploadsBase = path.resolve(process.cwd(), 'src', 'uploads');
 
-// ✅ Crear carpetas si no existen
-const crearCarpetas = () => {
-  const carpetas = [
-    path.join(uploadsBase, 'perfiles'),
-    path.join(uploadsBase, 'portadas'),
-    path.join(uploadsBase, 'publicaciones')
-  ];
+// Crear carpetas locales
+const carpetas = ['perfiles', 'portadas', 'publicaciones', 'documentos'];
+carpetas.forEach(carpeta => {
+  const dir = path.join(uploadsBase, carpeta);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+});
 
-  carpetas.forEach(carpeta => {
-    if (!fs.existsSync(carpeta)) {
-      fs.mkdirSync(carpeta, { recursive: true });
-      console.log(`✅ Carpeta creada: ${carpeta}`);
-    } else {
-      console.log(`📁 Carpeta ya existe: ${carpeta}`);
-    }
-  });
-};
-
-// Ejecutar creación de carpetas al iniciar
-crearCarpetas();
-
-// Configuración de almacenamiento
+/**
+ * Almacenamiento Local
+ */
 const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    let destino;
+  destination: (req, file, cb) => {
+    let subfolder = 'publicaciones';
+    if (file.fieldname === 'foto_perfil') subfolder = 'perfiles';
+    else if (file.fieldname === 'foto_portada') subfolder = 'portadas';
+    else if (file.fieldname === 'documentos') subfolder = 'documentos';
     
-    // Determinar carpeta según el tipo de imagen
-    if (file.fieldname === 'foto_perfil') {
-      destino = path.join(uploadsBase, 'perfiles');
-    } else if (file.fieldname === 'foto_portada') {
-      destino = path.join(uploadsBase, 'portadas');
-    } else {
-      destino = path.join(uploadsBase, 'publicaciones');
-    }
-    
-    console.log(`📤 Guardando ${file.fieldname} en: ${destino}`);
+    const destino = path.join(uploadsBase, subfolder);
+    if (!fs.existsSync(destino)) fs.mkdirSync(destino, { recursive: true });
     cb(null, destino);
   },
-  filename: function (req, file, cb) {
-    // 🔥 CLAVE: Obtener el usuario_id desde req.usuario (viene del middleware proteger)
-    const usuario_id = req.usuario ? req.usuario.id : 'guest';
-    
-    // Generar nombre único: foto_{tipo}-{usuario_id}-{timestamp}.ext
+  filename: (req, file, cb) => {
+    const usuario_id = req.usuario?.id ?? 'anon';
     const timestamp = Date.now();
     const ext = path.extname(file.originalname).toLowerCase();
-    
-    // Formato: foto_perfil-6-1761972628605.jpg
-    const filename = `${file.fieldname}-${usuario_id}-${timestamp}${ext}`;
-    
-    console.log(`📝 Nombre de archivo generado: ${filename}`);
-    console.log(`👤 Usuario ID: ${usuario_id}`);
-    
-    cb(null, filename);
+    cb(null, `${file.fieldname}-${usuario_id}-${timestamp}${ext}`);
   }
 });
 
-// Filtro de archivos (solo imágenes)
-const fileFilter = (req, file, cb) => {
-  const allowedTypes = /jpeg|jpg|png|gif|webp/;
-  const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-  const mimetype = allowedTypes.test(file.mimetype);
-
-  if (mimetype && extname) {
-    console.log(`✅ Archivo válido: ${file.originalname}`);
-    return cb(null, true);
+const imageFilter = (req, file, cb) => {
+  const allowed = /jpeg|jpg|png|gif|webp/;
+  if (allowed.test(path.extname(file.originalname).toLowerCase()) && allowed.test(file.mimetype)) {
+    cb(null, true);
   } else {
-    console.log(`❌ Archivo rechazado: ${file.originalname}`);
-    cb(new Error('Solo se permiten imágenes (jpeg, jpg, png, gif, webp)'));
+    cb(new Error('Solo imágenes'));
   }
 };
 
-// Configuración de multer
-const upload = multer({
-  storage: storage,
-  limits: {
-    fileSize: 50 * 1024 * 1024 // 50MB máximo
-  },
-  fileFilter: fileFilter
-});
+const documentFilter = (req, file, cb) => {
+  const tiposPermitidos = [
+    'application/pdf', 'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'text/csv', 'text/plain'
+  ];
+  if (tiposPermitidos.includes(file.mimetype)) cb(null, true);
+  else cb(new Error('Documento no permitido'));
+};
 
-module.exports = { upload };
+const combinedFilter = (req, file, cb) => {
+  if (['imagen', 'foto_perfil', 'foto_portada'].includes(file.fieldname)) return imageFilter(req, file, cb);
+  if (file.fieldname === 'documentos') return documentFilter(req, file, cb);
+  cb(null, true);
+};
+
+const upload = multer({ storage, fileFilter: imageFilter, limits: { fileSize: 10 * 1024 * 1024 } });
+const uploadDocumentos = multer({ storage, fileFilter: documentFilter, limits: { fileSize: 10 * 1024 * 1024 } });
+const uploadPublicacion = multer({ storage, fileFilter: combinedFilter, limits: { fileSize: 10 * 1024 * 1024, files: 10 } });
+
+/**
+ * Eliminar archivo (se llama deleteFromS3 por compatibilidad)
+ */
+const deleteFile = async (urlOrPath) => {
+  if (!urlOrPath) return false;
+  try {
+    let relativePath = urlOrPath;
+    if (urlOrPath.startsWith('http')) {
+        const parts = urlOrPath.split('/uploads/');
+        if (parts.length > 1) relativePath = parts[1];
+        else return false;
+    }
+    relativePath = relativePath.replace(/^\/?uploads\//, '');
+    const filePath = path.join(uploadsBase, relativePath);
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    return true;
+  } catch (err) {
+    console.error('Error deleteFile:', err.message);
+    return false;
+  }
+};
+
+/**
+ * Generar URL firmada (o local en este caso)
+ */
+const getSignedUrl = (key) => {
+  const baseUrl = process.env.API_URL || 'http://localhost:3000';
+  const cleanKey = key.replace(/^\/?uploads\//, '');
+  return `${baseUrl}/uploads/${cleanKey}`;
+};
+
+module.exports = { 
+  upload, 
+  uploadDocumentos, 
+  uploadPublicacion, 
+  deleteFromS3: deleteFile, 
+  getSignedUrl,
+  s3: { deleteObject: () => ({ promise: () => Promise.resolve() }) } 
+};

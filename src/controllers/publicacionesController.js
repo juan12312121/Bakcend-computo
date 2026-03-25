@@ -5,6 +5,8 @@ const CensuraPublicaciones = require('../services/CensuraPublicaciones');
 const { deleteFromS3 } = require('../config/aws');
 const { successResponse, errorResponse } = require('../utils/responses');
 
+const baseUrl = process.env.API_URL || 'http://localhost:3000';
+
 /**
  * ============================================
  * CONTROLADOR DE PUBLICACIONES CON CENSURA + DOCUMENTOS + VISIBILIDAD
@@ -196,7 +198,7 @@ exports.crearPublicacion = async (req, res) => {
     const nuevaPublicacionId = await Publicacion.crear({
       usuario_id: req.usuario.id,
       contenido,
-      imagen_url: req.files?.imagen?.[0]?.location || (req.files?.imagen?.[0] ? `/uploads/publicaciones/${req.files.imagen[0].filename}` : null),
+      imagen_url: req.files?.imagen?.[0]?.location || (req.files?.imagen?.[0] ? `${baseUrl}/uploads/publicaciones/${req.files.imagen[0].filename}` : null),
       imagen_s3: req.files?.imagen?.[0]?.key || (req.files?.imagen?.[0] ? `publicaciones/${req.files.imagen[0].filename}` : null),
       categoria: categoria || 'General',
       visibilidad: visibilidadFinal,
@@ -214,7 +216,7 @@ exports.crearPublicacion = async (req, res) => {
           const documentoId = await Documento.crear({
             usuario_id: req.usuario.id,
             publicacion_id: nuevaPublicacionId,
-            documento_url: doc.location || `/uploads/documentos/${doc.filename}`,
+            documento_url: doc.location || `${baseUrl}/uploads/documentos/${doc.filename}`,
             documento_s3: doc.key || `documentos/${doc.filename}`,
             nombre_archivo: doc.originalname,
             tamano_archivo: doc.size,
@@ -490,7 +492,7 @@ exports.actualizarPublicacion = async (req, res) => {
         await deleteFromS3(publicacionActual.imagen_s3).catch(() => {});
       }
       datosActualizar.imagen_s3 = req.file.key || `publicaciones/${req.file.filename}`;
-      datosActualizar.imagen_url = req.file.location || `/uploads/publicaciones/${req.file.filename}`;
+      datosActualizar.imagen_url = req.file.location || `${baseUrl}/uploads/publicaciones/${req.file.filename}`;
     }
 
     const actualizado = await Publicacion.actualizar(id, req.usuario.id, datosActualizar);
