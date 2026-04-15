@@ -10,7 +10,6 @@ const fs = require('fs');
 const routes = require('./routes');
 const errorHandler = require('./middlewares/errorHandler');
 const db = require('./config/database');
-const { s3 } = require('./config/aws');
 const { genAI } = require('./config/gemini');
 
 // 🆕 Importar SSE y modelo de Notificaciones
@@ -92,31 +91,6 @@ try {
 
 console.log('========================================');
 
-// 🔥 Endpoint para verificar S3
-app.get('/api/s3/health', async (req, res) => {
-  try {
-    const params = {
-      Bucket: process.env.AWS_BUCKET_NAME
-    };
-    
-    await s3.headBucket(params).promise();
-    
-    res.json({
-      success: true,
-      mensaje: '✅ Conexión con S3 exitosa',
-      bucket: process.env.AWS_BUCKET_NAME,
-      region: process.env.AWS_REGION,
-      url: process.env.AWS_S3_URL
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      mensaje: '❌ Error al conectar con S3',
-      error: error.message,
-      bucket: process.env.AWS_BUCKET_NAME
-    });
-  }
-});
 
 // 🤖 Endpoint para verificar GEMINI
 app.get('/api/gemini/health', async (req, res) => {
@@ -164,34 +138,6 @@ app.get('/api/gemini/health', async (req, res) => {
   }
 });
 
-// 🔥 Listar archivos en S3
-app.get('/api/s3/files', async (req, res) => {
-  try {
-    const params = {
-      Bucket: process.env.AWS_BUCKET_NAME
-    };
-    
-    const data = await s3.listObjectsV2(params).promise();
-    
-    const archivos = data.Contents.map(file => ({
-      nombre: file.Key,
-      tamaño: file.Size,
-      fecha: file.LastModified,
-      url: `${process.env.AWS_S3_URL}/${file.Key}`
-    }));
-    
-    res.json({
-      success: true,
-      total: archivos.length,
-      archivos: archivos
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
 
 // Debug de archivos locales
 app.get('/debug/uploads', (req, res) => {
@@ -229,7 +175,7 @@ app.get('/debug/uploads', (req, res) => {
     
     res.json({
       success: true,
-      nota: '⚠️ Archivos locales. S3 es el almacenamiento principal.',
+      nota: '📁 Utilizando almacenamiento local.',
       directorios: {
         perfiles: {
           existe: perfilesExists,
@@ -265,13 +211,12 @@ app.get('/health', async (req, res) => {
       timestamp: new Date().toISOString(),
       servicios: {
         base_de_datos: '✅ Conectado',
-        s3: '✅ Configurado',
         gemini: '✅ Configurado',
-        sse: '✅ Configurado', // 🆕
-        cors: '✅ Habilitado'
+        sse: '✅ Configurado', 
+        cors: '✅ Habilitado',
+        almacenamiento: '📁 Local'
       },
       endpoints_debug: {
-        s3_health: '/api/s3/health',
         gemini_health: '/api/gemini/health',
         uploads: '/debug/uploads'
       }
@@ -289,15 +234,13 @@ app.get('/health', async (req, res) => {
 app.get('/', (req, res) => {
   res.json({
     mensaje: 'API RedStudent funcionando correctamente',
-    version: '2.0.0 - AWS S3 + Gemini + SSE',
-    almacenamiento: 'AWS S3',
+    version: '2.0.0 - Local Storage + Gemini + SSE',
+    almacenamiento: 'Local (Disk)',
     censura: 'Google Gemini',
-    notificaciones: 'Server-Sent Events (SSE)', // 🆕
+    notificaciones: 'Server-Sent Events (SSE)', 
     endpoints: {
       health: '/health',
-      s3Health: '/api/s3/health',
       geminiHealth: '/api/gemini/health',
-      s3Files: '/api/s3/files',
       auth: '/api/auth',
       usuarios: '/api/usuarios',
       publicaciones: '/api/publicaciones',

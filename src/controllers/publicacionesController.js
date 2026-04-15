@@ -2,10 +2,10 @@ const Publicacion = require('../models/Publicacion');
 const Documento = require('../models/Documento');
 const Notificacion = require('../models/Notificacion');
 const CensuraPublicaciones = require('../services/CensuraPublicaciones');
-const { deleteFromS3 } = require('../config/aws');
+const { deleteFile, getUrl } = require('../config/multer');
 const { successResponse, errorResponse } = require('../utils/responses');
 
-const baseUrl = process.env.API_URL || 'http://localhost:3000';
+const baseUrl = process.env.API_URL || 'https://bakcend-computo-1.onrender.com';
 
 /**
  * ============================================
@@ -52,25 +52,17 @@ exports.crearPublicacion = async (req, res) => {
 
     // Validar contenido
     if (!contenido || contenido.trim().length === 0) {
-      if (req.files?.imagen?.[0]) {
-        await deleteFromS3(req.files.imagen[0].location).catch(() => {});
-      }
+      if (req.files?.imagen?.[0]) await deleteFile(req.files.imagen[0].filename).catch(() => {});
       if (req.files?.documentos) {
-        for (const doc of req.files.documentos) {
-          await deleteFromS3(doc.location).catch(() => {});
-        }
+        for (const doc of req.files.documentos) await deleteFile(doc.filename).catch(() => {});
       }
       return errorResponse(res, 'El contenido es obligatorio', 400);
     }
 
     if (contenido.length > 5000) {
-      if (req.files?.imagen?.[0]) {
-        await deleteFromS3(req.files.imagen[0].location).catch(() => {});
-      }
+      if (req.files?.imagen?.[0]) await deleteFile(req.files.imagen[0].filename).catch(() => {});
       if (req.files?.documentos) {
-        for (const doc of req.files.documentos) {
-          await deleteFromS3(doc.location).catch(() => {});
-        }
+        for (const doc of req.files.documentos) await deleteFile(doc.filename).catch(() => {});
       }
       return errorResponse(res, 'La publicación no puede exceder 5000 caracteres', 400);
     }
@@ -78,19 +70,11 @@ exports.crearPublicacion = async (req, res) => {
     // Validar categoría
     const categoriasValidas = Publicacion.getCategorias().map(c => c.value);
     if (categoria && !categoriasValidas.includes(categoria)) {
-      if (req.files?.imagen?.[0]) {
-        await deleteFromS3(req.files.imagen[0].location).catch(() => {});
-      }
+      if (req.files?.imagen?.[0]) await deleteFile(req.files.imagen[0].filename).catch(() => {});
       if (req.files?.documentos) {
-        for (const doc of req.files.documentos) {
-          await deleteFromS3(doc.location).catch(() => {});
-        }
+        for (const doc of req.files.documentos) await deleteFile(doc.filename).catch(() => {});
       }
-      return errorResponse(
-        res, 
-        `Categoría inválida. Debe ser una de: ${categoriasValidas.join(', ')}`, 
-        400
-      );
+      return errorResponse(res, `Categoría inválida`, 400);
     }
 
     // Validar visibilidad
@@ -98,19 +82,11 @@ exports.crearPublicacion = async (req, res) => {
     const visibilidadFinal = visibilidad || 'publico';
     
     if (!visibilidadesValidas.includes(visibilidadFinal)) {
-      if (req.files?.imagen?.[0]) {
-        await deleteFromS3(req.files.imagen[0].location).catch(() => {});
-      }
+      if (req.files?.imagen?.[0]) await deleteFile(req.files.imagen[0].filename).catch(() => {});
       if (req.files?.documentos) {
-        for (const doc of req.files.documentos) {
-          await deleteFromS3(doc.location).catch(() => {});
-        }
+        for (const doc of req.files.documentos) await deleteFile(doc.filename).catch(() => {});
       }
-      return errorResponse(
-        res, 
-        `Visibilidad inválida. Debe ser: ${visibilidadesValidas.join(', ')}`, 
-        400
-      );
+      return errorResponse(res, `Visibilidad inválida`, 400);
     }
 
     // 🔍 ANÁLISIS DE CENSURA - CONTENIDO
@@ -120,28 +96,11 @@ exports.crearPublicacion = async (req, res) => {
     );
 
     if (!analisisContenido.valido || analisisContenido.accion === 'rechazar') {
-      if (req.files?.imagen?.[0]) {
-        await deleteFromS3(req.files.imagen[0].location).catch(() => {});
-      }
+      if (req.files?.imagen?.[0]) await deleteFile(req.files.imagen[0].filename).catch(() => {});
       if (req.files?.documentos) {
-        for (const doc of req.files.documentos) {
-          await deleteFromS3(doc.location).catch(() => {});
-        }
+        for (const doc of req.files.documentos) await deleteFile(doc.filename).catch(() => {});
       }
-      
-      return errorResponse(
-        res,
-        `Tu publicación fue rechazada: ${analisisContenido.razon}`,
-        403,
-        {
-          motivo: analisisContenido.razon,
-          confianza: analisisContenido.confianza,
-          detalles: {
-            contenido: analisisContenido.problemas,
-            imagen: []
-          }
-        }
-      );
+      return errorResponse(res, `Tu publicación fue rechazada: ${analisisContenido.razon}`, 403);
     }
 
     if (req.files?.imagen?.[0]) {
@@ -149,35 +108,18 @@ exports.crearPublicacion = async (req, res) => {
     }
 
     // 🔍 ANÁLISIS DE CENSURA - IMAGEN
-    let analisisImagen = null;
     if (req.files?.imagen?.[0]) {
       analisisImagen = await CensuraPublicaciones.validarImagenDescripcion(
-        req.files.imagen[0].location,
+        req.files.imagen[0].path,
         contenido
       );
 
       if (!analisisImagen.apropiada || analisisImagen.accion === 'rechazar') {
-        await deleteFromS3(req.files.imagen[0].location).catch(() => {});
-        
+        await deleteFile(req.files.imagen[0].filename).catch(() => {});
         if (req.files?.documentos) {
-          for (const doc of req.files.documentos) {
-            await deleteFromS3(doc.location).catch(() => {});
-          }
+          for (const doc of req.files.documentos) await deleteFile(doc.filename).catch(() => {});
         }
-        
-        return errorResponse(
-          res,
-          `Tu imagen fue rechazada: ${analisisImagen.razon}`,
-          403,
-          {
-            motivo: analisisImagen.razon,
-            confianza: analisisImagen.confianza,
-            detalles: {
-              contenido: [],
-              imagen: analisisImagen.problemas
-            }
-          }
-        );
+        return errorResponse(res, `Tu imagen fue rechazada: ${analisisImagen.razon}`, 403);
       }
     }
 
@@ -195,11 +137,12 @@ exports.crearPublicacion = async (req, res) => {
     }
 
     // 📝 CREAR PUBLICACIÓN EN BD CON VISIBILIDAD Y GRUPO
+    const imagenId = req.files?.imagen?.[0]?.filename || null;
     const nuevaPublicacionId = await Publicacion.crear({
       usuario_id: req.usuario.id,
       contenido,
-      imagen_url: req.files?.imagen?.[0]?.location || (req.files?.imagen?.[0] ? `${baseUrl}/uploads/publicaciones/${req.files.imagen[0].filename}` : null),
-      imagen_s3: req.files?.imagen?.[0]?.key || (req.files?.imagen?.[0] ? `publicaciones/${req.files.imagen[0].filename}` : null),
+      imagen_url: req.files?.imagen?.[0]?.path || null,
+      imagen_s3: imagenId,
       categoria: categoria || 'General',
       visibilidad: visibilidadFinal,
       grupo_id: grupo_id || null,
@@ -216,8 +159,8 @@ exports.crearPublicacion = async (req, res) => {
           const documentoId = await Documento.crear({
             usuario_id: req.usuario.id,
             publicacion_id: nuevaPublicacionId,
-            documento_url: doc.location || `${baseUrl}/uploads/documentos/${doc.filename}`,
-            documento_s3: doc.key || `documentos/${doc.filename}`,
+            documento_url: doc.path,
+            documento_s3: doc.filename, // public_id en Cloudinary
             nombre_archivo: doc.originalname,
             tamano_archivo: doc.size,
             tipo_archivo: doc.mimetype,
@@ -227,7 +170,7 @@ exports.crearPublicacion = async (req, res) => {
 
           documentosSubidos.push({
             id: documentoId,
-            location: doc.location
+            location: doc.path
           });
 
           console.log(`✅ Documento ${documentoId} vinculado a publicación ${nuevaPublicacionId}`);
@@ -263,14 +206,9 @@ exports.crearPublicacion = async (req, res) => {
   } catch (error) {
     console.error('❌ Error al crear publicación:', error);
 
-    if (req.files?.imagen?.[0] && imagenSubida) {
-      await deleteFromS3(req.files.imagen[0].location).catch(() => {});
-    }
-    
+    if (req.files?.imagen?.[0]) await deleteFile(req.files.imagen[0].filename).catch(() => {});
     if (req.files?.documentos) {
-      for (const doc of req.files.documentos) {
-        await deleteFromS3(doc.location).catch(() => {});
-      }
+      for (const doc of req.files.documentos) await deleteFile(doc.filename).catch(() => {});
     }
     
     return errorResponse(res, 'Error al crear publicación', 500);
@@ -443,40 +381,29 @@ exports.actualizarPublicacion = async (req, res) => {
       );
 
       if (!analisisContenido.valido) {
-        if (req.file) {
-          await deleteFromS3(req.file.location).catch(() => {});
-        }
+        if (req.file) await deleteFile(req.file.filename).catch(() => {});
         return errorResponse(
           res,
           `Tu contenido actualizado es inapropiado: ${analisisContenido.razon}`,
-          403,
-          { 
-            problemas: analisisContenido.problemas,
-            confianza: analisisContenido.confianza
-          }
+          403
         );
       }
     }
 
     if (req.file) {
       imagenSubida = true;
-      
       const analisisImagen = await CensuraPublicaciones.validarImagenDescripcion(
-        req.file.location,
+        req.file.path,
         contenido || publicacionActual.contenido
       );
 
       if (!analisisImagen.apropiada || analisisImagen.accion === 'rechazar') {
-        await deleteFromS3(req.file.location).catch(() => {});
+        await deleteFile(req.file.filename).catch(() => {});
         
         return errorResponse(
           res,
-          `Tu imagen actualizada es inapropiada: ${analisisImagen.razon}`,
-          403,
-          { 
-            problemas: analisisImagen.problemas,
-            confianza: analisisImagen.confianza
-          }
+          `Tu imagen actualizada es inapropiado: ${analisisImagen.razon}`,
+          403
         );
       }
     }
@@ -488,18 +415,16 @@ exports.actualizarPublicacion = async (req, res) => {
     
     if (req.file) {
       if (publicacionActual.imagen_s3) {
-        await deleteFromS3(publicacionActual.imagen_s3).catch(() => {});
+        await deleteFile(publicacionActual.imagen_s3).catch(() => {});
       }
-      datosActualizar.imagen_s3 = req.file.key || `publicaciones/${req.file.filename}`;
-      datosActualizar.imagen_url = req.file.location || `${baseUrl}/uploads/publicaciones/${req.file.filename}`;
+      datosActualizar.imagen_s3 = req.file.filename;
+      datosActualizar.imagen_url = req.file.path;
     }
 
     const actualizado = await Publicacion.actualizar(id, req.usuario.id, datosActualizar);
 
     if (!actualizado) {
-      if (req.file && imagenSubida) {
-        await deleteFromS3(req.file.location).catch(() => {});
-      }
+      if (req.file) await deleteFile(req.file.filename).catch(() => {});
       return errorResponse(res, 'No se pudo actualizar la publicación', 400);
     }
 
@@ -513,9 +438,7 @@ exports.actualizarPublicacion = async (req, res) => {
     return successResponse(res, publicacionActualizada, 'Publicación actualizada correctamente');
 
   } catch (error) {
-    if (req.file && imagenSubida) {
-      await deleteFromS3(req.file.location).catch(() => {});
-    }
+    if (req.file) await deleteFile(req.file.filename).catch(() => {});
     
     return errorResponse(res, 'Error al actualizar publicación', 500);
   }
@@ -563,16 +486,12 @@ exports.eliminarPublicacion = async (req, res) => {
 
     // Eliminar imagen de S3
     if (publicacion.imagen_s3) {
-      await deleteFromS3(publicacion.imagen_s3).catch(() => {});
+      await deleteFile(publicacion.imagen_s3).catch(() => {});
     }
 
-    // 🆕 Obtener y eliminar documentos asociados
-    let documentosEliminados = 0;
     if (publicacion.documentos && publicacion.documentos.length > 0) {
       for (const doc of publicacion.documentos) {
-        if (doc.documento_s3) {
-          await deleteFromS3(doc.documento_s3).catch(() => {});
-        }
+        if (doc.documento_s3) await deleteFile(doc.documento_s3).catch(() => {});
       }
       documentosEliminados = publicacion.documentos.length;
     }

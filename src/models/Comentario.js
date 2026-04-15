@@ -12,6 +12,10 @@ const Comentario = {
       `;
       
       const [result] = await pool.query(query, [publicacion_id, usuario_id, texto]);
+      
+      // Sincronizar contador en tabla publicaciones
+      await pool.query('UPDATE publicaciones SET total_comentarios = total_comentarios + 1 WHERE id = ?', [publicacion_id]);
+      
       return result.insertId;
     } catch (error) {
       console.error('Error en Comentario.crear:', error);
@@ -165,12 +169,20 @@ const Comentario = {
    */
   async eliminar(id) {
     try {
+      // Obtener publicación_id antes de borrar
+      const [comentario] = await pool.query('SELECT publicacion_id FROM comentarios WHERE id = ?', [id]);
+      
       const query = `
         DELETE FROM comentarios
         WHERE id = ?
       `;
       
       const [result] = await pool.query(query, [parseInt(id)]);
+      
+      if (result.affectedRows > 0 && comentario[0]) {
+        await pool.query('UPDATE publicaciones SET total_comentarios = GREATEST(0, total_comentarios - 1) WHERE id = ?', [comentario[0].publicacion_id]);
+      }
+      
       return result.affectedRows > 0;
     } catch (error) {
       console.error('Error en Comentario.eliminar:', error);

@@ -1,7 +1,7 @@
 // src/controllers/usuariosController.js
 const Usuario = require('../models/Usuario');
 const { successResponse, errorResponse } = require('../utils/responses');
-const { deleteFromS3 } = require('../config/aws');
+const { deleteFile, getUrl } = require('../config/multer');
 
 // ==================== OBTENER MI PERFIL (USUARIO AUTENTICADO) ====================
 exports.obtenerMiPerfil = async (req, res) => {
@@ -72,40 +72,41 @@ exports.actualizarPerfil = async (req, res) => {
     // Obtener usuario anterior para comparar / eliminar si procede
     const usuarioAnterior = await Usuario.buscarPorId(usuarioId);
 
-    const baseUrl = process.env.API_URL || 'http://localhost:3000';
+    const baseUrl = process.env.API_URL || 'https://bakcend-computo-1.onrender.com';
 
     // Manejar foto de perfil
-    if (req.files && req.files.foto_perfil && req.files.foto_perfil.length > 0) {
+    if (req.files && req.files.foto_perfil?.[0]) {
       const fotoPerfil = req.files.foto_perfil[0];
-      datosActualizar.foto_perfil_url = fotoPerfil.location || `${baseUrl}/uploads/perfiles/${fotoPerfil.filename}`;
-      datosActualizar.foto_perfil_s3 = fotoPerfil.key || `perfiles/${fotoPerfil.filename}`;
+      
+      datosActualizar.foto_perfil_url = fotoPerfil.path;
+      datosActualizar.foto_perfil_s3 = fotoPerfil.filename; // public_id
 
-      console.log('✅ Foto de perfil guardada en S3/Local:', datosActualizar.foto_perfil_url, datosActualizar.foto_perfil_s3);
-      // Eliminar anterior solo si existe y es distinta a la nueva
+      console.log('✅ Foto de perfil guardada en Cloudinary:', datosActualizar.foto_perfil_url);
+      
       try {
-        if (usuarioAnterior?.foto_perfil_s3 && usuarioAnterior.foto_perfil_s3 !== datosActualizar.foto_perfil_s3) {
-          await deleteFromS3(usuarioAnterior.foto_perfil_s3);
-          console.log('🗑️ Foto de perfil anterior eliminada de S3');
+        if (usuarioAnterior?.foto_perfil_s3 && usuarioAnterior.foto_perfil_s3 !== fotoPerfil.filename) {
+          await deleteFile(usuarioAnterior.foto_perfil_s3);
         }
       } catch (err) {
-        console.warn('⚠️ No se pudo eliminar foto de perfil anterior:', err.message || err);
+        console.warn('⚠️ No se pudo eliminar foto de perfil anterior:', err.message);
       }
     }
 
     // Manejar foto de portada
-    if (req.files && req.files.foto_portada && req.files.foto_portada.length > 0) {
+    if (req.files && req.files.foto_portada?.[0]) {
       const fotoPortada = req.files.foto_portada[0];
-      datosActualizar.foto_portada_url = fotoPortada.location || `${baseUrl}/uploads/portadas/${fotoPortada.filename}`;
-      datosActualizar.foto_portada_s3 = fotoPortada.key || `portadas/${fotoPortada.filename}`;
+      
+      datosActualizar.foto_portada_url = fotoPortada.path;
+      datosActualizar.foto_portada_s3 = fotoPortada.filename; // public_id
 
-      console.log('✅ Foto de portada guardada en S3/Local:', datosActualizar.foto_portada_url, datosActualizar.foto_portada_s3);
+      console.log('✅ Foto de portada guardada en Cloudinary:', datosActualizar.foto_portada_url);
+      
       try {
-        if (usuarioAnterior?.foto_portada_s3 && usuarioAnterior.foto_portada_s3 !== datosActualizar.foto_portada_s3) {
-          await deleteFromS3(usuarioAnterior.foto_portada_s3);
-          console.log('🗑️ Foto de portada anterior eliminada de S3');
+        if (usuarioAnterior?.foto_portada_s3 && usuarioAnterior.foto_portada_s3 !== fotoPortada.filename) {
+          await deleteFile(usuarioAnterior.foto_portada_s3);
         }
       } catch (err) {
-        console.warn('⚠️ No se pudo eliminar foto de portada anterior:', err.message || err);
+        console.warn('⚠️ No se pudo eliminar foto de portada anterior:', err.message);
       }
     }
 
@@ -136,8 +137,7 @@ exports.actualizarPerfil = async (req, res) => {
     console.log('✅ Perfil actualizado:', {
       id: usuarioActualizado.id,
       nombre: usuarioActualizado.nombre_completo,
-      foto_perfil_url: usuarioActualizado.foto_perfil_url,
-      foto_portada_url: usuarioActualizado.foto_portada_url
+      foto_perfil_url: usuarioActualizado.foto_perfil_url
     });
 
     return successResponse(res, usuarioActualizado, 'Perfil actualizado exitosamente');
@@ -145,14 +145,10 @@ exports.actualizarPerfil = async (req, res) => {
     console.error('❌ Error al actualizar perfil:', error);
     console.error('Stack:', error.stack);
 
-    // Eliminar archivos subidos a S3 si hay error
+    // Eliminar archivos subidos si hay error
     if (req.files) {
-      try {
-        if (req.files.foto_perfil) await deleteFromS3(req.files.foto_perfil[0].key || `perfiles/${req.files.foto_perfil[0].filename}`);
-      } catch (e) { console.error('Error al limpiar foto de perfil:', e); }
-      try {
-        if (req.files.foto_portada) await deleteFromS3(req.files.foto_portada[0].key || `portadas/${req.files.foto_portada[0].filename}`);
-      } catch (e) { console.error('Error al limpiar foto de portada:', e); }
+      if (req.files.foto_perfil?.[0]) await deleteFile(req.files.foto_perfil[0].filename);
+      if (req.files.foto_portada?.[0]) await deleteFile(req.files.foto_portada[0].filename);
     }
 
     return errorResponse(res, 'Error al actualizar perfil', 500);
@@ -186,12 +182,10 @@ exports.eliminarCuenta = async (req, res) => {
 
     if (usuario) {
       if (usuario.foto_perfil_s3) {
-        try { await deleteFromS3(usuario.foto_perfil_s3); console.log('✅ Foto de perfil eliminada de S3'); }
-        catch (e) { console.error('Error al eliminar foto de perfil:', e); }
+        await deleteFile(usuario.foto_perfil_s3).catch(() => {});
       }
       if (usuario.foto_portada_s3) {
-        try { await deleteFromS3(usuario.foto_portada_s3); console.log('✅ Foto de portada eliminada de S3'); }
-        catch (e) { console.error('Error al eliminar foto de portada:', e); }
+        await deleteFile(usuario.foto_portada_s3).catch(() => {});
       }
     }
 
