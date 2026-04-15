@@ -17,11 +17,10 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
  * 🎯 MODELOS DISPONIBLES - Nomenclatura correcta para API v1
  */
 const MODELOS_DISPONIBLES = [
-  'gemini-2.5-flash',
-  'gemini-flash-latest',
+  'gemini-1.5-flash',
+  'gemini-1.5-flash-8b',
   'gemini-2.0-flash',
-  'gemini-2.5-flash-lite',
-  'gemini-2.5-pro',
+  'gemini-1.5-pro',
 ];
 
 const MODELOS = {
@@ -381,12 +380,11 @@ async function obtenerModeloConFallback(tipoModelo = 'FLASH') {
       
     } catch (error) {
       if (error.message?.includes('429') || error.message?.includes('quota')) {
-        console.log(`⚠️ Cuota agotada en ${nombreModelo}, cambiando a censura manual`);
-        usarCensuraManual = true;
-        return null;
+        console.log(`⚠️ Cuota agotada en ${nombreModelo}, probando siguiente modelo...`);
+        continue; // Probar el siguiente en lugar de rendirse
       }
       
-      console.log(`❌ Modelo ${nombreModelo} no disponible`);
+      console.log(`❌ Modelo ${nombreModelo} no disponible: ${error.message}`);
       continue;
     }
   }
