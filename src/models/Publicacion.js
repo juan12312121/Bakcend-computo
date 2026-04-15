@@ -91,8 +91,9 @@ class Publicacion {
   /**
    * Obtener todas las publicaciones (públicas) - CON VISIBILIDAD
    */
-  static async obtenerTodas(usuarioActualId = null) {
+  static async obtenerTodas(usuarioActualId = null, page = 1, limit = 20) {
     try {
+      const offset = (page - 1) * limit;
       const checkColumn = `
         SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS 
         WHERE TABLE_NAME = 'usuarios' AND COLUMN_NAME = 'suspendido'
@@ -117,11 +118,10 @@ class Publicacion {
         query += ` AND U.suspendido = 0`;
       }
       
-      query += ` ORDER BY P.fecha_creacion DESC LIMIT 100`;
+      query += ` ORDER BY P.fecha_creacion DESC LIMIT ? OFFSET ?`;
       
-      const [filas] = await db.execute(query);
+      const [filas] = await db.execute(query, [limit, offset]);
       
-      // Agregar documentos a cada publicación
       for (let publicacion of filas) {
         publicacion.documentos = await Documento.obtenerPorPublicacion(publicacion.id);
       }
@@ -309,9 +309,10 @@ class Publicacion {
     }
   }
 
-static async obtenerTodasParaUsuario(usuarioId) {
+static async obtenerTodasParaUsuario(usuarioId, page = 1, limit = 20) {
   try {
-    console.log('📱 [obtenerTodasParaUsuario] Iniciando para usuario:', usuarioId);
+    const offset = (page - 1) * limit;
+    console.log(`📱 [obtenerTodasParaUsuario] Iniciando para usuario: ${usuarioId}, Page: ${page}, Limit: ${limit}`);
     
     const publicacionesOcultas = await PublicacionOculta.obtenerIdsPorUsuario(usuarioId);
     let ocultasClause = '';
@@ -333,8 +334,6 @@ static async obtenerTodasParaUsuario(usuarioId) {
     if (tableCheck[0].count === 0) {
       console.warn('⚠️ [obtenerTodasParaUsuario] Tabla seguidores NO EXISTE - fallback');
       
-      // FALLBACK: Si no hay tabla seguidores, enviar todas las publicaciones
-      // con su campo visibilidad para que el frontend filtre
       const query = `
         SELECT 
           P.id,
@@ -359,19 +358,11 @@ static async obtenerTodasParaUsuario(usuarioId) {
           AND U.suspendido = 0
           ${ocultasClause}
         ORDER BY P.fecha_creacion DESC
-        LIMIT 100
+        LIMIT ? OFFSET ?
       `;
       
-      const [filas] = await db.execute(query);
+      const [filas] = await db.execute(query, [limit, offset]);
       console.log(`✅ [obtenerTodasParaUsuario] Total obtenido: ${filas.length}`);
-      
-      // Log de visibilidades
-      const stats = {
-        publico: filas.filter(p => p.visibilidad === 'publico').length,
-        seguidores: filas.filter(p => p.visibilidad === 'seguidores').length,
-        privado: filas.filter(p => p.visibilidad === 'privado').length
-      };
-      console.log('📊 [obtenerTodasParaUsuario] Estadísticas:', stats);
       
       for (let publicacion of filas) {
         publicacion.documentos = await Documento.obtenerPorPublicacion(publicacion.id);
@@ -380,7 +371,6 @@ static async obtenerTodasParaUsuario(usuarioId) {
       return filas;
     }
     
-    // ✅ QUERY PRINCIPAL CON TABLA SEGUIDORES
     console.log('✅ [obtenerTodasParaUsuario] Tabla seguidores EXISTE - query completo');
     
     const query = `
@@ -407,17 +397,10 @@ static async obtenerTodasParaUsuario(usuarioId) {
         AND U.suspendido = 0
         ${ocultasClause}
         AND (
-          -- 1️⃣ Mis propias publicaciones (TODAS - público, seguidores, privado)
           P.usuario_id = ?
-          
           OR
-          
-          -- 2️⃣ Publicaciones PÚBLICAS de cualquier usuario
           P.visibilidad = 'publico'
-          
           OR
-          
-          -- 3️⃣ Publicaciones con visibilidad 'SEGUIDORES' de usuarios que YO sigo
           (
             P.usuario_id IN (
               SELECT siguiendo_id 
@@ -428,33 +411,18 @@ static async obtenerTodasParaUsuario(usuarioId) {
           )
         )
       ORDER BY P.fecha_creacion DESC
-      LIMIT 100
+      LIMIT ? OFFSET ?
     `;
     
-    const [filas] = await db.execute(query, [usuarioId, usuarioId]);
+    const [filas] = await db.execute(query, [usuarioId, usuarioId, limit, offset]);
     
     console.log(`✅ [obtenerTodasParaUsuario] Publicaciones encontradas: ${filas.length}`);
     
-    // Estadísticas detalladas
-    const stats = {
-      total: filas.length,
-      publico: filas.filter(p => p.visibilidad === 'publico').length,
-      seguidores: filas.filter(p => p.visibilidad === 'seguidores').length,
-      privado: filas.filter(p => p.visibilidad === 'privado').length,
-      mias: filas.filter(p => p.usuario_id === usuarioId).length,
-      deOtros: filas.filter(p => p.usuario_id !== usuarioId).length
-    };
-    
-    console.log('📊 [obtenerTodasParaUsuario] Estadísticas:', stats);
-    console.log('📋 [obtenerTodasParaUsuario] IDs obtenidos:', filas.map(f => `${f.id}(${f.visibilidad})`).join(', '));
-    
-    // Cargar documentos adjuntos
     for (let publicacion of filas) {
       publicacion.documentos = await Documento.obtenerPorPublicacion(publicacion.id);
     }
     
     return filas;
-    
   } catch (error) {
     console.error('❌ [obtenerTodasParaUsuario] ERROR:', error.message);
     console.error('Stack:', error.stack);

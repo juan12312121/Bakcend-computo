@@ -283,32 +283,31 @@ exports.crearPublicacion = async (req, res) => {
  */
 exports.obtenerPublicaciones = async (req, res) => {
   try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    
     let publicaciones;
 
     if (!req.usuario || !req.usuario.id) {
-      // Usuario no autenticado: solo públicas
-      publicaciones = await Publicacion.obtenerAleatorias(20);
+      publicaciones = await Publicacion.obtenerAleatorias(limit);
       return successResponse(res, publicaciones, 'Publicaciones públicas');
     }
 
     try {
-      publicaciones = await Publicacion.obtenerTodasParaUsuario(req.usuario.id);
+      publicaciones = await Publicacion.obtenerTodasParaUsuario(req.usuario.id, page, limit);
       
       if (!publicaciones || publicaciones.length === 0) {
-        publicaciones = await Publicacion.obtenerAleatorias(20);
-        return successResponse(res, publicaciones, 'Publicaciones aleatorias (no sigues a nadie)');
-      }
-      
-      if (publicaciones.length < 5) {
-        const aleatorias = await Publicacion.obtenerAleatorias(10);
-        const idsExistentes = new Set(publicaciones.map(p => p.id));
-        const nuevas = aleatorias.filter(p => !idsExistentes.has(p.id));
-        publicaciones = [...publicaciones, ...nuevas];
+        if (page === 1) {
+          publicaciones = await Publicacion.obtenerAleatorias(limit);
+          return successResponse(res, publicaciones, 'Publicaciones aleatorias');
+        }
+        return successResponse(res, [], 'No hay más publicaciones');
       }
 
       return successResponse(res, publicaciones, 'Feed personalizado');
       
     } catch (feedError) {
+      // ... rest of logic ...
       publicaciones = await Publicacion.obtenerTodas(req.usuario.id);
       
       if (!publicaciones || publicaciones.length === 0) {
@@ -320,7 +319,7 @@ exports.obtenerPublicaciones = async (req, res) => {
     
   } catch (error) {
     try {
-      const publicacionesBackup = await Publicacion.obtenerTodas(req.usuario?.id);
+      const publicacionesBackup = await Publicacion.obtenerTodas(req.usuario?.id, page, limit);
       return successResponse(res, publicacionesBackup || [], 'Publicaciones (modo backup)');
     } catch (backupError) {
       return errorResponse(res, 'Error al obtener publicaciones', 500);
