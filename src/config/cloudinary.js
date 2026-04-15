@@ -2,8 +2,10 @@ const cloudinary = require('cloudinary').v2;
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
 
 if (process.env.CLOUDINARY_URL) {
-  // Cloudinary detecta automáticamente la variable CLOUDINARY_URL
-  console.log('✅ Usando CLOUDINARY_URL para la configuración');
+  cloudinary.config({
+    cloudinary_url: process.env.CLOUDINARY_URL
+  });
+  console.log('✅ Configuración de Cloudinary cargada desde URL');
 } else {
   cloudinary.config({
     cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
