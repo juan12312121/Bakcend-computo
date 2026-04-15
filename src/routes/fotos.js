@@ -15,9 +15,9 @@ function construirUrlS3(key, tipo = 'perfil') {
   
   console.log('🔧 construirUrlS3 - INPUT:', { key, tipo });
   
-  // Si ya es una URL completa de S3, devolverla tal cual
-  if (key.includes('s3.amazonaws.com') || key.includes('s3.us-east-2.amazonaws.com')) {
-    console.log('✅ URL S3 completa detectada, devolviendo tal cual:', key);
+  // Si ya es una URL completa (S3 o Cloudinary), devolverla tal cual
+  if (key.startsWith('http')) {
+    console.log('✅ URL completa detectada, devolviendo tal cual:', key);
     return key;
   }
   

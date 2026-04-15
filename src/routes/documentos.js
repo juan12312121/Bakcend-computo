@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { proteger } = require('../middlewares/auth');
 const documentosController = require('../controllers/documentosController');
-const { uploadDocumentos } = require('../config/aws');
+const { uploadDocumentos } = require('../config/multer');
 
 // Middleware de manejo de errores para multer
 const handleUploadError = (err, req, res, next) => {

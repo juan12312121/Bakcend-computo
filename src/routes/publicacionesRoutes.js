@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { proteger } = require('../middlewares/auth');
 const publicacionController = require('../controllers/publicacionesController');
-const { upload, uploadPublicacion } = require('../config/aws');
+const { upload, uploadPublicacion } = require('../config/multer');
 
 /**
  * ============================================

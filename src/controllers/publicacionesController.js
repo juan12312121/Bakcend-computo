@@ -334,21 +334,21 @@ exports.actualizarPublicacion = async (req, res) => {
     const publicacionActual = await Publicacion.obtenerPorId(id, req.usuario.id);
     if (!publicacionActual) {
       if (req.file) {
-        await deleteFromS3(req.file.location).catch(() => {});
+        await deleteFile(req.file.filename).catch(() => {});
       }
       return errorResponse(res, 'Publicación no encontrada', 404);
     }
 
     if (publicacionActual.usuario_id !== req.usuario.id) {
       if (req.file) {
-        await deleteFromS3(req.file.location).catch(() => {});
+        await deleteFile(req.file.filename).catch(() => {});
       }
       return errorResponse(res, 'No tienes permiso para actualizar esta publicación', 403);
     }
 
     if (contenido && contenido.length > 5000) {
       if (req.file) {
-        await deleteFromS3(req.file.location).catch(() => {});
+        await deleteFile(req.file.filename).catch(() => {});
       }
       return errorResponse(res, 'La publicación no puede exceder 5000 caracteres', 400);
     }
@@ -357,7 +357,7 @@ exports.actualizarPublicacion = async (req, res) => {
       const categoriasValidas = Publicacion.getCategorias().map(c => c.value);
       if (!categoriasValidas.includes(categoria)) {
         if (req.file) {
-          await deleteFromS3(req.file.location).catch(() => {});
+          await deleteFile(req.file.filename).catch(() => {});
         }
         return errorResponse(res, `Categoría inválida`, 400);
       }
@@ -368,7 +368,7 @@ exports.actualizarPublicacion = async (req, res) => {
       const visibilidadesValidas = ['publico', 'privado', 'seguidores'];
       if (!visibilidadesValidas.includes(visibilidad)) {
         if (req.file) {
-          await deleteFromS3(req.file.location).catch(() => {});
+          await deleteFile(req.file.filename).catch(() => {});
         }
         return errorResponse(res, 'Visibilidad inválida', 400);
       }

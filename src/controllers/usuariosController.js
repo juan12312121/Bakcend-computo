@@ -121,10 +121,10 @@ exports.actualizarPerfil = async (req, res) => {
       // limpiar archivos subidos si hay fallo
       if (req.files) {
         try {
-          if (req.files.foto_perfil) await deleteFromS3(req.files.foto_perfil[0].key || `perfiles/${req.files.foto_perfil[0].filename}`);
+          if (req.files.foto_perfil) await deleteFile(req.files.foto_perfil[0].filename);
         } catch (e) { console.error('Error limpiando foto_perfil:', e); }
         try {
-          if (req.files.foto_portada) await deleteFromS3(req.files.foto_portada[0].key || `portadas/${req.files.foto_portada[0].filename}`);
+          if (req.files.foto_portada) await deleteFile(req.files.foto_portada[0].filename);
         } catch (e) { console.error('Error limpiando foto_portada:', e); }
       }
       return errorResponse(res, 'No se pudo actualizar el perfil', 400);

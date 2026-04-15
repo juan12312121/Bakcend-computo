@@ -8,20 +8,8 @@ const { validarActualizarPerfil } = require('../utils/validators');
 const { validarResultado } = require('../middlewares/validation');
 
 // Configuración de upload
-let upload;
-try {
-  const awsConfig = require('../config/aws');
-  if (awsConfig && awsConfig.upload) {
-    console.log('✅ Usando almacenamiento en AWS S3');
-    upload = awsConfig.upload;
-  } else {
-    throw new Error('Falta configuración de AWS');
-  }
-} catch (err) {
-  console.warn('⚠️ AWS S3 no disponible, usando almacenamiento local');
-  const multerConfig = require('../config/multer');
-  upload = multerConfig.upload;
-}
+// Configuración de upload
+const { upload } = require('../config/multer');
 
 // ================= RUTAS DE PERFIL =================
 router.get('/me', proteger, usuariosController.obtenerMiPerfil);
