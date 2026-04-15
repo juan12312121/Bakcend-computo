@@ -17,8 +17,13 @@ const io = socketConfig.init(server);
 // Mantener compatibilidad con global.io
 global.io = io;
 
-server.listen(PORT, HOST, () => {
+const runMigrations = require('./runMigrations');
+
+server.listen(PORT, HOST, async () => {
   console.log('🚀 Servidor corriendo en puerto:', PORT);
   console.log('🌐 Host:', HOST);
   console.log('🔧 Entorno:', process.env.NODE_ENV || 'development');
+  
+  // Ejecutar migraciones al arrancar
+  await runMigrations();
 });
