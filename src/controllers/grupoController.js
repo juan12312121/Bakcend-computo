@@ -243,8 +243,12 @@ const grupoController = {
 
             res.json({ success: true, data: invitaciones });
         } catch (error) {
-            console.error('Error al obtener invitaciones:', error);
-            res.status(500).json({ success: false, message: 'Error en el servidor' });
+            console.error('❌ Error al obtener invitaciones:', error);
+            res.status(500).json({ 
+                success: false, 
+                message: 'Error en el servidor al cargar invitaciones',
+                error: process.env.NODE_ENV === 'development' ? error.message : undefined 
+            });
         }
     },
 
@@ -297,6 +301,55 @@ const grupoController = {
             res.status(500).json({ success: false, message: 'Error en el servidor' });
         } finally {
             connection.release();
+        }
+    },
+
+    // Actualizar datos del grupo (incluyendo fotos)
+    actualizarGrupo: async (req, res) => {
+        try {
+            const { id } = req.params;
+            const { nombre, descripcion, privacidad } = req.body;
+            const usuario_id = req.usuario.id;
+
+            // Verificar si el usuario es el creador o tiene permisos (por ahora solo creador)
+            const [grupoAct] = await db.query('SELECT creador_id FROM grupos WHERE id = ?', [id]);
+            
+            if (grupoAct.length === 0) {
+                return res.status(404).json({ success: false, message: 'Grupo no encontrado' });
+            }
+
+            if (grupoAct[0].creador_id !== usuario_id) {
+                return res.status(403).json({ success: false, message: 'No tienes permiso para editar este grupo' });
+            }
+
+            const campos = [];
+            const valores = [];
+
+            if (nombre) { campos.push('nombre = ?'); valores.push(nombre); }
+            if (descripcion) { campos.push('descripcion = ?'); valores.push(descripcion); }
+            if (privacidad) { campos.push('privacidad = ?'); valores.push(privacidad); }
+
+            // Manejo de fotos con Cloudinary
+            if (req.files?.foto_perfil) {
+                campos.push('imagen_url = ?');
+                valores.push(req.files.foto_perfil[0].path);
+            }
+            if (req.files?.foto_portada) {
+                campos.push('imagen_portada_url = ?');
+                valores.push(req.files.foto_portada[0].path);
+            }
+
+            if (campos.length === 0) {
+                return res.json({ success: true, message: 'No hay campos para actualizar' });
+            }
+
+            valores.push(id);
+            await db.query(`UPDATE grupos SET ${campos.join(', ')} WHERE id = ?`, valores);
+
+            res.json({ success: true, message: 'Grupo actualizado correctamente' });
+        } catch (error) {
+            console.error('Error al actualizar grupo:', error);
+            res.status(500).json({ success: false, message: 'Error en el servidor' });
         }
     }
 };

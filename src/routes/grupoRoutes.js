@@ -17,5 +17,6 @@ router.post('/:id/unirse', auth.proteger, grupoController.unirseGrupo);
 router.post('/:id/salir', auth.proteger, grupoController.salirGrupo);
 router.get('/:id/publicaciones', auth.opcional, grupoController.obtenerPublicaciones);
 router.post('/:id/invitar', auth.proteger, grupoController.invitarUsuario);
+router.put('/:id', auth.proteger, upload.fields([{ name: 'foto_perfil', maxCount: 1 }, { name: 'foto_portada', maxCount: 1 }]), grupoController.actualizarGrupo);
 
 module.exports = router;
