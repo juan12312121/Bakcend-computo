@@ -63,7 +63,7 @@ const grupoController = {
 
             // El creador se une automáticamente como administrador (activo)
             await db.query(
-                'INSERT INTO grupo_miembros (grupo_id, usuario_id, estado) VALUES (?, ?, "activo")',
+                'INSERT INTO grupo_miembros (grupo_id, usuario_id, estado) VALUES (?, ?, \'activo\')',
                 [grupoId, creador_id]
             );
 
@@ -264,7 +264,7 @@ const grupoController = {
 
             // Verificar invitación
             const [inv] = await connection.query(
-                'SELECT * FROM grupo_invitaciones WHERE id = ? AND invitado_id = ? AND estado = "pendiente"',
+                'SELECT * FROM grupo_invitaciones WHERE id = ? AND invitado_id = ? AND estado = \'pendiente\'',
                 [invitacion_id, usuario_id]
             );
 
@@ -276,19 +276,19 @@ const grupoController = {
             if (accion === 'aceptar') {
                 // Actualizar invitación
                 await connection.query(
-                    'UPDATE grupo_invitaciones SET estado = "aceptada" WHERE id = ?',
+                    'UPDATE grupo_invitaciones SET estado = \'aceptada\' WHERE id = ?',
                     [invitacion_id]
                 );
 
                 // Unir al grupo
                 await connection.query(
-                    'INSERT INTO grupo_miembros (grupo_id, usuario_id, estado) VALUES (?, ?, "activo")',
+                    'INSERT INTO grupo_miembros (grupo_id, usuario_id, estado) VALUES (?, ?, \'activo\')',
                     [inv[0].grupo_id, usuario_id]
                 );
             } else {
                 // Rechazar
                 await connection.query(
-                    'UPDATE grupo_invitaciones SET estado = "rechazada" WHERE id = ?',
+                    'UPDATE grupo_invitaciones SET estado = \'rechazada\' WHERE id = ?',
                     [invitacion_id]
                 );
             }
