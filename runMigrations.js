@@ -8,7 +8,8 @@ async function runMigrations() {
     // Lista de archivos SQL a ejecutar en orden
     const migrationFiles = [
         'migrations_groups.sql',
-        'migrations_invitations.sql'
+        'migrations_invitations.sql',
+        'migrations_chat_files.sql'
     ];
 
     for (const file of migrationFiles) {
