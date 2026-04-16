@@ -27,6 +27,7 @@ router.get('/usuario/:usuario_id/seccion/:seccion_id', seccionesController.obten
  */
 router.post('/', proteger, seccionesController.crearSeccion);
 router.get('/', proteger, seccionesController.obtenerMisSecciones);
+router.get('/mis-secciones', proteger, seccionesController.obtenerMisSecciones); // Añadida para compatibilidad
 router.get('/:id', proteger, seccionesController.obtenerSeccion);
 router.put('/:id', proteger, seccionesController.actualizarSeccion);
 router.delete('/:id', proteger, seccionesController.eliminarSeccion);
