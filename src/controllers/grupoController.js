@@ -237,7 +237,7 @@ const grupoController = {
                 FROM grupo_invitaciones i
                 JOIN grupos g ON i.grupo_id = g.id
                 JOIN usuarios u ON i.remitente_id = u.id
-                WHERE i.invitado_id = ? AND i.estado = "pendiente"`,
+                WHERE i.invitado_id = ? AND i.estado = 'pendiente'`,
                 [usuario_id]
             );
 
