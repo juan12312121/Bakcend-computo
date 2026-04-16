@@ -98,7 +98,21 @@ exports.enviarMensaje = async (req, res) => {
             return res.status(403).json({ success: false, message: 'No perteneces a este chat' });
         }
 
-        const mensaje = await MensajeChat.crear({ chat_id: chatId, emisor_id: emisorId, texto });
+        let archivo_url = null;
+        let tipo_archivo = null;
+
+        if (req.file) {
+            archivo_url = req.file.path; // Cloudinary URL
+            tipo_archivo = req.file.mimetype.startsWith('image/') ? 'image' : 'document';
+        }
+
+        const mensaje = await MensajeChat.crear({ 
+            chat_id: chatId, 
+            emisor_id: emisorId, 
+            texto: texto || '', 
+            archivo_url, 
+            tipo_archivo 
+        });
 
         // ✅ Emitir en tiempo real
         try {

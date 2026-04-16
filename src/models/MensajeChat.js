@@ -2,10 +2,10 @@
 const db = require('../config/database');
 
 class MensajeChat {
-    static async crear({ chat_id, emisor_id, texto }) {
+    static async crear({ chat_id, emisor_id, texto, archivo_url, tipo_archivo }) {
         const [resultado] = await db.execute(
-            'INSERT INTO mensajes_chat (chat_id, emisor_id, texto) VALUES (?, ?, ?)',
-            [chat_id, emisor_id, texto]
+            'INSERT INTO mensajes_chat (chat_id, emisor_id, texto, archivo_url, tipo_archivo) VALUES (?, ?, ?, ?, ?)',
+            [chat_id, emisor_id, texto || '', archivo_url || null, tipo_archivo || null]
         );
 
         // Actualizar ultima_interaccion del chat
@@ -18,7 +18,9 @@ class MensajeChat {
             id: resultado.insertId,
             chat_id,
             emisor_id,
-            texto,
+            texto: texto || '',
+            archivo_url: archivo_url || null,
+            tipo_archivo: tipo_archivo || null,
             fecha_creacion: new Date()
         };
     }
@@ -26,7 +28,7 @@ class MensajeChat {
     static async obtenerPorChat(chat_id, limite = 50) {
         const limiteInt = parseInt(limite, 10) || 50;
         const query = `
-      SELECT m.id, m.chat_id, m.emisor_id, m.texto, m.leido, m.fecha_creacion,
+      SELECT m.id, m.chat_id, m.emisor_id, m.texto, m.archivo_url, m.tipo_archivo, m.leido, m.fecha_creacion,
              u.nombre_usuario, u.nombre_completo
       FROM mensajes_chat m
       JOIN usuarios u ON m.emisor_id = u.id
