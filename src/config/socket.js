@@ -22,6 +22,12 @@ const init = (server) => {
     io.on('connection', (socket) => {
         console.log('🔌 Nuevo cliente conectado:', socket.id);
 
+        // Unirse a sala personal del usuario para notificaciones globales
+        socket.on('join_user_room', (userId) => {
+            socket.join(`user_${userId}`);
+            console.log(`👤 Usuario ${userId} unido a su sala personal`);
+        });
+
         // Unirse a una sala privada de chat
         socket.on('join_chat', (chatId) => {
             socket.join(`chat_${chatId}`);

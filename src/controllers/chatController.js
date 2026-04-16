@@ -100,12 +100,21 @@ exports.enviarMensaje = async (req, res) => {
 
         const mensaje = await MensajeChat.crear({ chat_id: chatId, emisor_id: emisorId, texto });
 
-        // ✅ Emitir en tiempo real a todos en la sala del chat
+        // ✅ Emitir en tiempo real
         try {
             const io = socketConfig.getIo();
+            // Al chatroom (para quien esté dentro viendo el chat)
             io.to(`chat_${chatId}`).emit('new_message', {
                 ...mensaje,
                 chat_id: Number(chatId)
+            });
+
+            // Al usuario destinatario (para notificación global/header)
+            const receptorId = Number(chat.usuario1_id) === Number(emisorId) ? chat.usuario2_id : chat.usuario1_id;
+            io.to(`user_${receptorId}`).emit('new_message', {
+                ...mensaje,
+                chat_id: Number(chatId),
+                is_global_notif: true
             });
         } catch (socketError) {
             console.warn('⚠️ Socket no disponible, pero mensaje guardado:', socketError.message);
