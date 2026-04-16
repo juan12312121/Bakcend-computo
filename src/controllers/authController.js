@@ -68,8 +68,12 @@ exports.login = async (req, res) => {
       return errorResponse(res, 'Email y contraseña son requeridos', 400);
     }
     
-    // Buscar usuario por email
-    const usuario = await Usuario.buscarPorEmail(email);
+    // Buscar usuario por email o nombre de usuario
+    let usuario = await Usuario.buscarPorEmail(email);
+    
+    if (!usuario) {
+      usuario = await Usuario.buscarPorNombreUsuario(email);
+    }
     
     if (!usuario) {
       return errorResponse(res, 'Credenciales inválidas', 401);
