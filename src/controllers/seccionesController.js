@@ -117,11 +117,17 @@ const seccionesController = {
         });
       }
 
+      let imagen_portada = null;
+      if (req.file) {
+        imagen_portada = req.file.path; // Subido a Cloudinary vía multer-storage-cloudinary
+      }
+
       const seccionId = await SeccionModel.crear(
         usuario_id,
         nombre.trim(),
         icono || 'fa-folder',
-        color || 'from-gray-400 to-gray-600'
+        color || 'from-gray-400 to-gray-600',
+        imagen_portada
       );
 
       const seccion = await SeccionModel.buscarPorId(seccionId);

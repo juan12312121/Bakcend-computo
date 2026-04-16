@@ -4,6 +4,8 @@ const router = express.Router();
 const seccionesController = require('../controllers/seccionesController');
 const { proteger, opcional } = require('../middlewares/auth');
 
+const { upload } = require('../config/multer');
+
 // ==================== RUTAS PÚBLICAS (sin autenticación obligatoria) ====================
 
 /**
@@ -25,7 +27,7 @@ router.get('/usuario/:usuario_id/seccion/:seccion_id', seccionesController.obten
 /**
  * CRUD de secciones propias
  */
-router.post('/', proteger, seccionesController.crearSeccion);
+router.post('/', proteger, upload.single('imagen_portada'), seccionesController.crearSeccion);
 router.get('/', proteger, seccionesController.obtenerMisSecciones);
 router.get('/mis-secciones', proteger, seccionesController.obtenerMisSecciones); // Añadida para compatibilidad
 router.get('/:id', proteger, seccionesController.obtenerSeccion);

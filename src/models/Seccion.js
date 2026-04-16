@@ -3,13 +3,13 @@ const pool = require('../config/database');
 const SeccionModel = {
   
   // Crear una nueva sección
-  crear: async (usuario_id, nombre, icono = 'fa-folder', color = 'from-gray-400 to-gray-600') => {
+  crear: async (usuario_id, nombre, icono = 'fa-folder', color = 'from-gray-400 to-gray-600', imagen_portada = null) => {
     const connection = await pool.getConnection();
     try {
       const [result] = await connection.query(
-        `INSERT INTO secciones (usuario_id, nombre, icono, color) 
-         VALUES (?, ?, ?, ?)`,
-        [usuario_id, nombre, icono, color]
+        `INSERT INTO secciones (usuario_id, nombre, icono, color, imagen_portada) 
+         VALUES (?, ?, ?, ?, ?)`,
+        [usuario_id, nombre, icono, color, imagen_portada]
       );
       return result.insertId;
     } finally {
