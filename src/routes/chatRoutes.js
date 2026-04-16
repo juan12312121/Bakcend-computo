@@ -2,6 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const chatController = require('../controllers/chatController');
+const { proteger } = require('../middlewares/auth');
 const { uploadPublicacion } = require('../config/multer');
 
 router.use(proteger); // Todas las rutas de chat requieren autenticación
