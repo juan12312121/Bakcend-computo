@@ -29,6 +29,12 @@ const handleUploadError = (err, req, res, next) => {
 // ⚠️ RUTAS ESPECÍFICAS PRIMERO (ANTES DE /:id)
 
 /**
+ * BUSCAR PUBLICACIONES
+ * GET /api/publicaciones/buscar
+ */
+router.get('/buscar', proteger, publicacionController.buscar);
+
+/**
  * GET /api/publicaciones/categorias
  * Obtener todas las categorías disponibles
  */

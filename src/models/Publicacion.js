@@ -524,6 +524,50 @@ static async verificarSiSigue(seguidorId, seguidoId) {
   }
 
   /**
+   * Buscar publicaciones por contenido o autor
+   */
+  static async buscar(termino, usuarioActualId = null, limit = 20) {
+    try {
+      const terminoBusqueda = `%${termino}%`;
+      
+      const query = `
+        SELECT 
+          P.*,
+          U.nombre_completo, 
+          U.nombre_usuario, 
+          U.foto_perfil_url
+        FROM publicaciones P
+        INNER JOIN usuarios U ON U.id = P.usuario_id
+        WHERE P.oculto = 0 
+          AND (P.contenido LIKE ? OR U.nombre_completo LIKE ? OR U.nombre_usuario LIKE ?)
+          AND (
+            P.visibilidad = 'publico'
+            OR P.usuario_id = ?
+            OR (
+              P.visibilidad = 'seguidores'
+              AND P.usuario_id IN (
+                SELECT siguiendo_id FROM seguidores WHERE seguidor_id = ?
+              )
+            )
+          )
+        ORDER BY P.fecha_creacion DESC
+        LIMIT ?
+      `;
+
+      const [filas] = await db.execute(query, [terminoBusqueda, terminoBusqueda, terminoBusqueda, usuarioActualId, usuarioActualId, limit]);
+      
+      for (let publicacion of filas) {
+        publicacion.documentos = await Documento.obtenerPorPublicacion(publicacion.id);
+      }
+      
+      return filas;
+    } catch (error) {
+      console.error('Error en Publicacion.buscar:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Obtener todas las categorías disponibles
    */
   static getCategorias() {

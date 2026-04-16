@@ -526,3 +526,24 @@ exports.eliminarPublicacion = async (req, res) => {
     return errorResponse(res, 'Error al eliminar publicación', 500);
   }
 };
+
+/**
+ * BUSCAR PUBLICACIONES
+ * GET /api/publicaciones/buscar?q=termino
+ */
+exports.buscar = async (req, res) => {
+  try {
+    const { q } = req.query;
+    if (!q) {
+      return errorResponse(res, 'El término de búsqueda es obligatorio', 400);
+    }
+
+    const usuarioActualId = req.usuario?.id || null;
+    const publicaciones = await Publicacion.buscar(q, usuarioActualId);
+
+    return successResponse(res, publicaciones, `Resultados de búsqueda para: ${q}`);
+  } catch (error) {
+    console.error('Error en buscar publicaciones:', error);
+    return errorResponse(res, 'Error al buscar publicaciones', 500);
+  }
+};
