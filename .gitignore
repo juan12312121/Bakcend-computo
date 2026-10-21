@@ -1,3 +1,11 @@
-Bakcend-computo/
 node_modules/
+dist/
 .env
+*.sqlite
+# Cuenta de servicio de Firebase (secreta)
+firebase-*.json
+
+# Respaldos con datos reales (no se publican; usar database/trinoflow_esquema.sql)
+database/trinoflow_completo.sql
+database/respaldo_completo.sql
+database/redstudent_db.sql

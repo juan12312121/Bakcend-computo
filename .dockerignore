@@ -1,0 +1,8 @@
+node_modules
+dist
+legacy
+tests
+docs
+.env
+*.sqlite
+firebase-*.json
