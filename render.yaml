@@ -1,0 +1,54 @@
+# Blueprint de Render: API de TrinoFlow (Node 22, plan gratis).
+# La base MySQL vive en Aiven; sus datos se capturan en el panel de Render (sync: false).
+services:
+  - type: web
+    name: trinoflow-api
+    runtime: node
+    plan: free
+    region: oregon
+    # NODE_ENV=production haría que npm ci omita TypeScript; por eso --include=dev.
+    buildCommand: npm ci --include=dev && npm run build
+    # init-db crea las tablas que falten (la primera vez, todas) y luego arranca la API.
+    startCommand: node dist/scripts/init-db.js && node dist/server.js
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "22"
+      - key: API_URL
+        value: https://trinoflow-api.onrender.com
+      - key: FRONTEND_URL
+        value: https://computo-en-la-nube2-dusky.vercel.app
+      - key: CORS_ORIGINS
+        value: ""
+      - key: JWT_SECRET
+        generateValue: true
+      - key: BOLETOS_SECRETO
+        generateValue: true
+      # --- MySQL en Aiven (Overview → Connection information) ---
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        sync: false
+      - key: DB_USER
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: DB_NAME
+        value: defaultdb
+      - key: DB_SSL
+        value: "true"
+      - key: DB_SSL_CA
+        sync: false
+      # --- Cloudinary (las fotos y videos) ---
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      # --- Push con Firebase: sube firebase-cuenta-servicio.json como "Secret File" ---
+      - key: FIREBASE_SERVICE_ACCOUNT
+        value: /etc/secrets/firebase-cuenta-servicio.json

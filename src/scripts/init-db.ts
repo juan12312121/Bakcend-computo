@@ -1,11 +1,12 @@
 /**
- * Prepara la base MySQL local.
+ * Prepara la base MySQL (local o en la nube).
  *   npm run db:init            → crea la base si no existe, carga el respaldo si está vacía y completa el esquema
  *   npm run db:init -- --force → borra la base y la vuelve a cargar desde cero
  */
 import fs from 'fs';
 import path from 'path';
 import mysql from 'mysql2/promise';
+import { opcionesSsl } from '../config/database';
 import { env } from '../config/env';
 import { sequelize } from '../infrastructure/database/models';
 import { SchemaSync } from '../infrastructure/database/SchemaSync';
@@ -20,6 +21,7 @@ async function prepararBase(force: boolean): Promise<boolean> {
     password: env.DB_PASSWORD,
     multipleStatements: true,
     charset: 'utf8mb4',
+    ssl: opcionesSsl(),
   });
   try {
     if (force) await conexion.query(`DROP DATABASE IF EXISTS \`${env.DB_NAME}\``);
@@ -28,6 +30,12 @@ async function prepararBase(force: boolean): Promise<boolean> {
 
     const [tablas] = await conexion.query('SHOW TABLES');
     if ((tablas as unknown[]).length > 0) return false;
+
+    // El respaldo con datos no se publica en el repo: sin él, la base arranca vacía y el esquema sale de los modelos.
+    if (!fs.existsSync(RESPALDO)) {
+      console.log('ℹ️  No hay respaldo database/redstudent_db.sql: se crea el esquema vacío desde los modelos.');
+      return false;
+    }
 
     console.log('📥 Cargando respaldo database/redstudent_db.sql ...');
     await conexion.query(fs.readFileSync(RESPALDO, 'utf8'));

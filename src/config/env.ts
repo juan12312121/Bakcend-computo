@@ -22,6 +22,16 @@ const envSchema = z.object({
   DB_PASSWORD: z.string().default(''),
   DB_NAME: z.string().default('redstudent_db'),
   DB_STORAGE: z.string().default(':memory:'),
+  /** Conexión cifrada a MySQL (obligatoria en bases en la nube como Aiven). */
+  DB_SSL: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+  /**
+   * Certificado CA de la base (texto PEM; los saltos de línea pueden venir como "\n").
+   * Con él se verifica el servidor; sin él, la conexión va cifrada pero sin verificar.
+   */
+  DB_SSL_CA: z.string().optional(),
   DB_LOGGING: z
     .enum(['true', 'false'])
     .default('false')
